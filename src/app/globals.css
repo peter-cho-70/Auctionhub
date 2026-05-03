@@ -1,8 +1,39 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* dim·dark 에서 동일하게 어두운 표면 유틸 사용 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, [data-theme="dim"], [data-theme="dim"] *));
+
+[data-theme="light"] {
+  color-scheme: light;
+  --background: #f4f4f5;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-elevated: #fafafa;
+  --border-subtle: #e4e4e7;
+  --header-bg: color-mix(in oklab, #ffffff 92%, transparent);
+  --header-border: #e4e4e7;
+}
+
+[data-theme="dim"] {
+  color-scheme: dark;
+  --background: #52525b;
+  --foreground: #fafaf9;
+  --surface: #3f3f46;
+  --surface-elevated: #52525b;
+  --border-subtle: #71717a;
+  --header-bg: color-mix(in oklab, #3f3f46 90%, transparent);
+  --header-border: #71717a;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #09090b;
+  --foreground: #fafafa;
+  --surface: #18181b;
+  --surface-elevated: #27272a;
+  --border-subtle: #3f3f46;
+  --header-bg: color-mix(in oklab, #09090b 88%, transparent);
+  --header-border: #27272a;
 }
 
 @theme inline {
@@ -12,15 +43,57 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* mammoth DOCX → HTML 미리보기 (원본 강의 자료) */
+.lecture-doc-preview {
+  overflow-x: auto;
+}
+.lecture-doc-preview p {
+  margin: 0.65em 0;
+}
+.lecture-doc-preview p:first-child {
+  margin-top: 0;
+}
+.lecture-doc-preview p:last-child {
+  margin-bottom: 0;
+}
+.lecture-doc-preview ul,
+.lecture-doc-preview ol {
+  margin: 0.65em 0;
+  padding-left: 1.35em;
+}
+.lecture-doc-preview li {
+  margin: 0.25em 0;
+}
+.lecture-doc-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.85em 0;
+  font-size: 0.92em;
+}
+.lecture-doc-preview th,
+.lecture-doc-preview td {
+  border: 1px solid var(--border-subtle, #e4e4e7);
+  padding: 0.4em 0.55em;
+  vertical-align: top;
+}
+.lecture-doc-preview img {
+  max-width: 100%;
+  height: auto;
+}
+.lecture-doc-preview h1,
+.lecture-doc-preview h2,
+.lecture-doc-preview h3 {
+  margin: 1em 0 0.45em;
+  font-weight: 600;
+}
+.lecture-doc-preview h1:first-child,
+.lecture-doc-preview h2:first-child,
+.lecture-doc-preview h3:first-child {
+  margin-top: 0;
 }
