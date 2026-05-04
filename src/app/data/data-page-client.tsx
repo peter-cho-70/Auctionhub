@@ -15,10 +15,15 @@ import { useAppStore } from "@/store/app-store";
 
 export function DataPageClient({
   initialSessionEmail,
+  serverHasSupabaseEnv,
+  serverSupabaseHost,
 }: {
   initialSessionEmail: string | null;
+  serverHasSupabaseEnv: boolean;
+  serverSupabaseHost: string | null;
 }) {
   const router = useRouter();
+  const clientHasSupabaseEnv = isSupabaseConfigured();
   const exportDataJson = useAppStore((s) => s.exportDataJson);
   const importData = useAppStore((s) => s.importData);
   const resetToDefaults = useAppStore((s) => s.resetToDefaults);
@@ -34,7 +39,7 @@ export function DataPageClient({
   const [cloudBusy, setCloudBusy] = useState(false);
 
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!clientHasSupabaseEnv) return;
 
     const supabase = createClient();
 
@@ -61,10 +66,10 @@ export function DataPageClient({
     return () => {
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [clientHasSupabaseEnv, router]);
 
   const pullCloud = async () => {
-    if (!isSupabaseConfigured()) return;
+    if (!clientHasSupabaseEnv) return;
     setCloudBusy(true);
     setMsg(null);
     try {
@@ -92,7 +97,7 @@ export function DataPageClient({
   };
 
   const pushCloud = async () => {
-    if (!isSupabaseConfigured()) return;
+    if (!clientHasSupabaseEnv) return;
     setCloudBusy(true);
     setMsg(null);
     try {
@@ -108,7 +113,7 @@ export function DataPageClient({
   };
 
   const signOut = async () => {
-    if (!isSupabaseConfigured()) return;
+    if (!clientHasSupabaseEnv) return;
     setCloudBusy(true);
     try {
       const supabase = createClient();
@@ -166,7 +171,7 @@ export function DataPageClient({
         </p>
       </div>
 
-      {isSupabaseConfigured() && (
+      {clientHasSupabaseEnv && (
         <section className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm dark:border-sky-900 dark:bg-sky-950/40">
           <h2 className="font-medium text-sky-950 dark:text-sky-100">
             Supabase 클라우드
@@ -217,18 +222,41 @@ export function DataPageClient({
         </section>
       )}
 
-      {!isSupabaseConfigured() && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-          클라우드 연동을 쓰려면 빌드 환경에{" "}
-          <code className="rounded bg-white/70 px-1 dark:bg-black/30">
-            NEXT_PUBLIC_SUPABASE_URL
-          </code>
-          ,{" "}
-          <code className="rounded bg-white/70 px-1 dark:bg-black/30">
-            NEXT_PUBLIC_SUPABASE_ANON_KEY
-          </code>
-          를 설정한 뒤 재배포하세요.
-        </p>
+      {serverHasSupabaseEnv && !clientHasSupabaseEnv && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          <p className="font-medium">Vercel에는 Supabase 값이 있는데, 이 페이지 빌드에는 아직 반영되지 않았습니다.</p>
+          <p className="mt-2">
+            <code className="rounded bg-white/70 px-1 dark:bg-black/30">NEXT_PUBLIC_*</code>{" "}
+            변수는 <strong>빌드할 때</strong> 브라우저 번들에 들어갑니다. Vercel{" "}
+            <strong>Settings → Environment Variables</strong>에서 두 값을 저장한 뒤,{" "}
+            <strong>Deployments → Redeploy</strong>로 <strong>같은 커밋을 다시 빌드</strong>해야
+            클라우드 UI가 켜집니다.
+          </p>
+          {serverSupabaseHost && (
+            <p className="mt-2 text-xs opacity-90">
+              서버가 읽은 프로젝트 호스트:{" "}
+              <span className="font-mono">{serverSupabaseHost}</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {!serverHasSupabaseEnv && !clientHasSupabaseEnv && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          <p className="font-medium">Supabase 공개 환경 변수가 없습니다.</p>
+          <p className="mt-2">
+            이름은 정확히{" "}
+            <code className="rounded bg-white/70 px-1 dark:bg-black/30">
+              NEXT_PUBLIC_SUPABASE_URL
+            </code>{" "}
+            과{" "}
+            <code className="rounded bg-white/70 px-1 dark:bg-black/30">
+              NEXT_PUBLIC_SUPABASE_ANON_KEY
+            </code>{" "}
+            (anon public 키)이어야 하며, Vercel에서는 <strong>Production</strong>에
+            체크되어 있어야 합니다. 저장 후 반드시 <strong>재배포</strong>하세요.
+          </p>
+        </div>
       )}
 
       {msg && (
