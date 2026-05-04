@@ -1,7 +1,7 @@
 "use client";
 
 import mammoth from "mammoth";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { LECTURE_ORIGINAL_DOCS } from "@/lib/data/lecture-sources";
 import { STATUS_LABELS } from "@/lib/domain/status-labels";
 
@@ -34,10 +34,14 @@ export function LectureOriginalsView() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!selectedFile || !selected) return;
-    void loadDoc(selected.fileName, selected.href);
-  }, [selectedFile, selected, loadDoc]);
+  const selectFile = useCallback(
+    (fileName: string) => {
+      setSelectedFile(fileName);
+      const doc = LECTURE_ORIGINAL_DOCS.find((d) => d.fileName === fileName);
+      if (doc) void loadDoc(doc.fileName, doc.href);
+    },
+    [loadDoc],
+  );
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row-reverse lg:items-start">
@@ -59,7 +63,7 @@ export function LectureOriginalsView() {
               <li key={doc.fileName}>
                 <button
                   type="button"
-                  onClick={() => setSelectedFile(doc.fileName)}
+                  onClick={() => selectFile(doc.fileName)}
                   className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${
                     active
                       ? "border-amber-500/70 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"

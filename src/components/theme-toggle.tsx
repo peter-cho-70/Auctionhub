@@ -13,6 +13,7 @@ function applyTheme(theme: ThemePreference) {
 export function ThemeToggle() {
   const [preference, setPreference] = useState<ThemePreference>("light");
 
+  /* eslint-disable react-hooks/set-state-in-effect -- SSR 이후 localStorage로 테마 복원 */
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     let initial: ThemePreference = "light";
@@ -22,6 +23,7 @@ export function ThemeToggle() {
     setPreference(initial);
     applyTheme(initial);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, preference);

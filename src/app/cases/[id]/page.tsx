@@ -116,6 +116,8 @@ export default function CaseDetailPage() {
   const [buildingSqmInput, setBuildingSqmInput] = useState("");
   const [parkingCountInput, setParkingCountInput] = useState("");
 
+  // 물건 저장값이 바뀌면 입력칸과 맞춤 (같은 사건에서 갱신될 때)
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- 면적·주차만 저장값과 동기화 */
   useEffect(() => {
     if (!c) return;
     setLandSqmInput(c.landAreaSqm != null ? String(c.landAreaSqm) : "");
@@ -131,6 +133,7 @@ export default function CaseDetailPage() {
     c?.buildingAreaSqm,
     c?.parkingUnitCount,
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   const caseViewForRent = useMemo((): AuctionCase | null => {
     if (!c) return null;
@@ -713,7 +716,7 @@ export default function CaseDetailPage() {
 
       {tab === "rent" && (
         <CaseRentSettingPanel
-          caseId={id}
+          key={id}
           caseData={viewCase}
           templateExtras={extras}
           onSave={saveRentSetting}

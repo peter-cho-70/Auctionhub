@@ -1,7 +1,7 @@
 "use client";
 
 import mammoth from "mammoth";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   FORM_ORIGINAL_DOCS,
   getFormFilePreviewKind,
@@ -35,16 +35,21 @@ export function FormOriginalsView() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!selectedFile || !selected) return;
-    if (getFormFilePreviewKind(selected.href) !== "docx") {
-      setHtml("");
-      setErr(null);
-      setLoading(false);
-      return;
-    }
-    void loadDocx(selected.href);
-  }, [selectedFile, selected, loadDocx]);
+  const selectFile = useCallback(
+    (fileName: string) => {
+      setSelectedFile(fileName);
+      const doc = FORM_ORIGINAL_DOCS.find((d) => d.fileName === fileName);
+      if (!doc) return;
+      if (getFormFilePreviewKind(doc.href) === "docx") {
+        void loadDocx(doc.href);
+      } else {
+        setHtml("");
+        setErr(null);
+        setLoading(false);
+      }
+    },
+    [loadDocx],
+  );
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row-reverse lg:items-start">
@@ -70,7 +75,7 @@ export function FormOriginalsView() {
               <li key={doc.fileName}>
                 <button
                   type="button"
-                  onClick={() => setSelectedFile(doc.fileName)}
+                  onClick={() => selectFile(doc.fileName)}
                   className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${
                     active
                       ? "border-amber-500/70 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"

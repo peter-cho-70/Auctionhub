@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { AuctionCase, RentInvestmentYield, RentSetting, RentSettingUnitRow } from "@/lib/types/domain";
 import {
   computeInvestmentYieldDerived,
@@ -16,7 +16,6 @@ import {
 } from "@/lib/format/percent-input";
 
 type Props = {
-  caseId: string;
   caseData: AuctionCase;
   /** 문자·도구 탭과 동일 보조값 — 낙찰가 입력 시 낙찰가 대비 감정가 % 표시 */
   templateExtras?: Record<string, string>;
@@ -65,7 +64,6 @@ function pctFieldValue(
 }
 
 export function CaseRentSettingPanel({
-  caseId,
   caseData,
   templateExtras,
   onSave,
@@ -74,11 +72,6 @@ export function CaseRentSettingPanel({
   const [pctDraft, setPctDraft] = useState<Partial<Record<PctKey, string>>>(
     {},
   );
-
-  useEffect(() => {
-    setDraft(null);
-    setPctDraft({});
-  }, [caseId]);
 
   const rs = draft ?? caseData.rentSetting ?? emptyRentSetting();
   const derived = useMemo(() => computeRentSettingDerived(rs), [rs]);
