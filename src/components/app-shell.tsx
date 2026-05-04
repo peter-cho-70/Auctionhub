@@ -12,6 +12,7 @@ const links = [
   { href: "/lectures", label: "원본 자료" },
   { href: "/process", label: "프로세스" },
   { href: "/data", label: "데이터" },
+  { href: "/login", label: "계정" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

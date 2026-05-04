@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AuctionFlow Pro",
-  description: "경매 실행·지식 관리 (로컬 JSON)",
+  description: "경매 실행·지식 관리 (로컬 + Supabase 동기)",
 };
 
 export default function RootLayout({
