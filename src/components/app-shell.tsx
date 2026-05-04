@@ -11,6 +11,7 @@ const links = [
   { href: "/study", label: "공부하기" },
   { href: "/lectures", label: "원본 자료" },
   { href: "/process", label: "프로세스" },
+  { href: "/forms", label: "문서양식" },
   { href: "/data", label: "데이터" },
   { href: "/login", label: "계정" },
 ];
@@ -33,9 +34,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const active =
                 href === "/cases"
                   ? pathname === href || pathname.startsWith("/cases/")
-                  : href === "/lectures"
+                  :                 href === "/lectures"
                     ? pathname === href || pathname.startsWith("/lectures/")
-                    : pathname === href || pathname.startsWith(`${href}/`);
+                    : href === "/forms"
+                      ? pathname === href || pathname.startsWith("/forms/")
+                      : pathname === href || pathname.startsWith(`${href}/`);
               return (
                 <Link
                   key={href}

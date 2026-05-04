@@ -6,7 +6,8 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "forms:sample-pdf": "node scripts/gen-sample-pdf.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
