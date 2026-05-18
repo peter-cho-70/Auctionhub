@@ -6,6 +6,7 @@ import {
   saveAppStateAction,
 } from "@/app/actions/app-state";
 import { SupabaseAutosave } from "@/components/supabase-autosave";
+import { saveLocalDataSnapshot } from "@/lib/data/client-backup";
 import { createClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { useAppStore } from "@/store/app-store";
@@ -34,7 +35,9 @@ export function AppStoreProvider({
             if (remote.error) {
               console.warn("[Supabase]", remote.error);
             } else if (remote.json) {
-              useAppStore.getState().importData(remote.json, "replace");
+              const store = useAppStore.getState();
+              saveLocalDataSnapshot(store.exportDataJson(), "before-cloud-startup-merge");
+              store.importData(remote.json, "merge");
             } else {
               const { error: upErr } = await saveAppStateAction(
                 useAppStore.getState().exportDataJson(),

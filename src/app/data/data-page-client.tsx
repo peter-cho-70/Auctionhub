@@ -11,7 +11,23 @@ import { createClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { STANDARD_TEMPLATE_KEYS } from "@/lib/domain/template-vars";
 import { safeParseAppDataJson } from "@/lib/data/migrate";
+import {
+  appDataCaseCount,
+  listLocalDataSnapshots,
+  saveLocalDataSnapshot,
+} from "@/lib/data/client-backup";
 import { useAppStore } from "@/store/app-store";
+
+function snapshotCasePreview(json: string) {
+  const parsed = safeParseAppDataJson(json);
+  if (parsed instanceof Error) return [];
+  return parsed.cases.slice(0, 5).map((c) => ({
+    id: c.id,
+    title: [c.caseNumber, c.address].filter(Boolean).join(" · ") || "제목 없는 물건",
+    status: c.status,
+    updatedAt: c.updatedAt,
+  }));
+}
 
 export function DataPageClient({
   initialSessionEmail,
@@ -37,6 +53,13 @@ export function DataPageClient({
     initialSessionEmail,
   );
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [snapshots, setSnapshots] = useState<
+    ReturnType<typeof listLocalDataSnapshots>
+  >([]);
+
+  const refreshSnapshots = () => {
+    setSnapshots(listLocalDataSnapshots());
+  };
 
   useEffect(() => {
     if (!clientHasSupabaseEnv) return;
@@ -68,6 +91,10 @@ export function DataPageClient({
     };
   }, [clientHasSupabaseEnv, router]);
 
+  useEffect(() => {
+    refreshSnapshots();
+  }, []);
+
   const pullCloud = async () => {
     if (!clientHasSupabaseEnv) return;
     setCloudBusy(true);
@@ -84,13 +111,15 @@ export function DataPageClient({
       }
       if (
         !confirm(
-          "클라우드 데이터로 이 기기 화면의 데이터를 덮어씁니다. 계속할까요?",
+          "클라우드 데이터를 이 기기 데이터와 병합합니다. 계속할까요?",
         )
       ) {
         return;
       }
-      importData(r.json, "replace");
-      setMsg("클라우드에서 불러왔습니다.");
+      saveLocalDataSnapshot(exportDataJson(), "before-cloud-manual-merge");
+      refreshSnapshots();
+      importData(r.json, "merge");
+      setMsg("클라우드 데이터를 병합했습니다. 기존 로컬 데이터는 스냅샷으로 보관했습니다.");
     } finally {
       setCloudBusy(false);
     }
@@ -101,7 +130,14 @@ export function DataPageClient({
     setCloudBusy(true);
     setMsg(null);
     try {
-      const { error } = await saveAppStateAction(exportDataJson());
+      const json = exportDataJson();
+      if (
+        appDataCaseCount(json) === 0 &&
+        !confirm("현재 물건 목록이 비어 있습니다. 빈 데이터를 클라우드에 저장할까요?")
+      ) {
+        return;
+      }
+      const { error } = await saveAppStateAction(json);
       if (error) {
         setMsg(error);
         return;
@@ -127,7 +163,10 @@ export function DataPageClient({
   };
 
   const download = () => {
-    const blob = new Blob([exportDataJson()], {
+    const json = exportDataJson();
+    saveLocalDataSnapshot(json, "manual-json-export");
+    refreshSnapshots();
+    const blob = new Blob([json], {
       type: "application/json;charset=utf-8",
     });
     const a = document.createElement("a");
@@ -136,6 +175,28 @@ export function DataPageClient({
     a.click();
     URL.revokeObjectURL(a.href);
     setMsg("파일을 내려받았습니다.");
+  };
+
+  const downloadSnapshot = (snapshot: (typeof snapshots)[number]) => {
+    const blob = new Blob([snapshot.json], {
+      type: "application/json;charset=utf-8",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `auctionflow-snapshot-${snapshot.createdAt.slice(0, 10)}-${snapshot.id}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setMsg("스냅샷 파일을 내려받았습니다.");
+  };
+
+  const restoreSnapshot = (snapshot: (typeof snapshots)[number]) => {
+    if (!confirm(`스냅샷(${snapshot.caseCount}개 물건)으로 현재 데이터를 교체할까요?`)) {
+      return;
+    }
+    saveLocalDataSnapshot(exportDataJson(), "before-snapshot-restore");
+    importData(snapshot.json, "replace");
+    refreshSnapshots();
+    setMsg("스냅샷으로 복원했습니다.");
   };
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,6 +214,8 @@ export function DataPageClient({
     )
       ? "replace"
       : "merge";
+    saveLocalDataSnapshot(exportDataJson(), `before-json-import-${mode}`);
+    refreshSnapshots();
     importData(text, mode);
     setMsg(mode === "replace" ? "데이터를 교체했습니다." : "데이터를 병합했습니다.");
   };
@@ -265,6 +328,71 @@ export function DataPageClient({
         </p>
       )}
 
+      {snapshots.length > 0 && (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+          <h2 className="font-medium">로컬 자동 스냅샷</h2>
+          <p className="mt-1 text-xs opacity-90">
+            클라우드 병합, JSON 가져오기, 초기화 직전의 최근 상태를 1개만
+            보관합니다.
+          </p>
+          <div className="mt-3 space-y-2">
+            {snapshots.map((snapshot) => (
+              <div
+                key={snapshot.id}
+                className="rounded-lg bg-white/70 px-3 py-2 dark:bg-black/20"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-medium">
+                      {new Date(snapshot.createdAt).toLocaleString("ko-KR")} · 물건{" "}
+                      {snapshot.caseCount}개
+                    </p>
+                    <p className="text-xs opacity-80">{snapshot.reason}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => downloadSnapshot(snapshot)}
+                      className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs dark:border-emerald-800"
+                    >
+                      내려받기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => restoreSnapshot(snapshot)}
+                      className="rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-medium text-white dark:bg-emerald-200 dark:text-emerald-950"
+                    >
+                      복원
+                    </button>
+                  </div>
+                </div>
+                <ul className="mt-2 space-y-1 border-t border-emerald-200/70 pt-2 text-xs dark:border-emerald-900">
+                  {snapshotCasePreview(snapshot.json).map((caseItem) => (
+                    <li
+                      key={caseItem.id}
+                      className="flex flex-wrap justify-between gap-2"
+                    >
+                      <span className="font-medium">{caseItem.title}</span>
+                      <span className="opacity-75">
+                        {caseItem.updatedAt
+                          ? new Date(caseItem.updatedAt).toLocaleDateString("ko-KR")
+                          : caseItem.status}
+                      </span>
+                    </li>
+                  ))}
+                  {snapshot.caseCount > 5 && (
+                    <li className="opacity-75">외 {snapshot.caseCount - 5}개 물건</li>
+                  )}
+                  {snapshot.caseCount === 0 && (
+                    <li className="opacity-75">물건이 없는 백업입니다.</li>
+                  )}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -295,6 +423,8 @@ export function DataPageClient({
                 "모든 물건·노트·템플릿 수정이 초기화됩니다. 계속할까요?",
               )
             ) {
+              saveLocalDataSnapshot(exportDataJson(), "before-reset-to-defaults");
+              refreshSnapshots();
               resetToDefaults();
               setMsg("초기 데이터로 초기화했습니다.");
             }

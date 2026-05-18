@@ -1,9 +1,16 @@
-import type { AppData, AuctionCase, CaseStatus, RoomShape } from "@/lib/types/domain";
+import type {
+  AppData,
+  AuctionCase,
+  CaseSourceDocument,
+  CaseStatus,
+  RoomShape,
+} from "@/lib/types/domain";
 import { EMPTY_DECISION, emptyRoomShapeMix } from "@/lib/types/domain";
 import { buildCaseChecklistsFromTemplates } from "@/lib/domain/checklists";
 import { parseAuctionUrl } from "@/lib/domain/url-parser";
 import { estimateNextMinPrice } from "@/lib/domain/finance";
 import { emptyRentSetting } from "@/lib/domain/rent-setting";
+import { emptyMultiFamilyAnalysis } from "@/lib/domain/multifamily-analysis";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -23,6 +30,7 @@ export interface NewCaseInput {
   roomShapeMix?: Record<RoomShape, number>;
   appraisalPrice?: number | null;
   minPrice?: number | null;
+  expectedBidPrice?: number | null;
   bidDate?: string | null;
   priority?: AuctionCase["priority"];
   fieldSurvey?: string;
@@ -34,6 +42,7 @@ export interface NewCaseInput {
   buildingCoverageRatio?: string;
   floorAreaRatio?: string;
   lienBaseline?: string;
+  sourceDocuments?: CaseSourceDocument[];
   initialStatus?: CaseStatus;
 }
 
@@ -59,6 +68,9 @@ export function createAuctionCase(
     roomShapeMix: input.roomShapeMix
       ? { ...emptyRoomShapeMix(), ...input.roomShapeMix }
       : emptyRoomShapeMix(),
+    residentialUnitCount: null,
+    commercialUnitCount: null,
+    buildingUnitComposition: [],
     landAreaSqm:
       input.landAreaSqm === undefined ? null : input.landAreaSqm,
     buildingAreaSqm:
@@ -72,6 +84,12 @@ export function createAuctionCase(
     appraisalPrice:
       input.appraisalPrice === undefined ? null : input.appraisalPrice,
     minPrice,
+    expectedBidPrice:
+      input.expectedBidPrice === undefined
+        ? input.appraisalPrice != null
+          ? Math.round(input.appraisalPrice * 0.7)
+          : null
+        : input.expectedBidPrice,
     bidDate: input.bidDate ?? null,
     currentRound: 1,
     bidRounds: [],
@@ -79,10 +97,14 @@ export function createAuctionCase(
       minPrice != null ? estimateNextMinPrice(minPrice) : null,
     wonDayActionsCompleted: false,
     status: input.initialStatus ?? "watching",
+    priorityLevel: 1,
     priority: input.priority ?? "normal",
     fieldSurvey: input.fieldSurvey?.trim() ?? "",
     memo: input.memo ?? "",
+    sourceDocuments: input.sourceDocuments ?? [],
     rentSetting: emptyRentSetting(),
+    multiFamilyAnalysis: emptyMultiFamilyAnalysis(),
+    nearbyMarketAnalysis: null,
     checklists: buildCaseChecklistsFromTemplates(data),
     decision: { ...EMPTY_DECISION },
   };

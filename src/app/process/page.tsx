@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import { useAppStore } from "@/store/app-store";
 import { STATUS_LABELS } from "@/lib/domain/status-labels";
 import type { CaseStatus, ChecklistTemplateItem } from "@/lib/types/domain";
-import { DEFAULT_PROCESS_ORDER } from "@/lib/data/default-data";
+import {
+  DEFAULT_CHECKLIST_TEMPLATES,
+  DEFAULT_PROCESS_ORDER,
+} from "@/lib/data/default-data";
 import {
   getDefaultLectureGuideForStep,
   getResolvedLectureGuide,
@@ -66,6 +69,27 @@ export default function ProcessPage() {
     ]);
   };
 
+  const applyDefaultChecklistForStep = () => {
+    const defaults = DEFAULT_CHECKLIST_TEMPLATES[activeStep] ?? [];
+    setChecklistTemplateForStep(activeStep, structuredClone(defaults));
+  };
+
+  const applyDefaultChecklistsForAllSteps = () => {
+    if (
+      !confirm(
+        "모든 단계의 체크리스트 템플릿을 강의 기준 기본값으로 덮어쓸까요? 직접 수정한 체크리스트 문구도 변경됩니다.",
+      )
+    ) {
+      return;
+    }
+    for (const st of DEFAULT_PROCESS_ORDER) {
+      setChecklistTemplateForStep(
+        st,
+        structuredClone(DEFAULT_CHECKLIST_TEMPLATES[st] ?? []),
+      );
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -80,6 +104,22 @@ export default function ProcessPage() {
           필요합니다.
         </p>
         <p className="mt-1 text-xs text-neutral-500">{LECTURE_NOTE_SOURCE}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={applyDefaultChecklistForStep}
+            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+          >
+            현재 단계 체크리스트를 강의 기준으로 덮어쓰기
+          </button>
+          <button
+            type="button"
+            onClick={applyDefaultChecklistsForAllSteps}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+          >
+            전체 단계 체크리스트를 강의 기준으로 적용
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

@@ -2,7 +2,7 @@ import type { CaseStatus } from "@/lib/types/domain";
 
 export const STATUS_LABELS: Record<CaseStatus, string> = {
   watching: "관심물건",
-  researching: "자료조사중",
+  researching: "물건 검색",
   rights_check: "권리분석중",
   field_check: "임장예정/중",
   loan_check: "대출조사중",

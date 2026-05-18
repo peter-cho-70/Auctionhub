@@ -13,6 +13,7 @@ import type {
   ChecklistTemplateItem,
   KnowledgeNote,
   MessageTemplate,
+  PropertyAnalysisSettings,
 } from "@/lib/types/domain";
 import { STORAGE_KEY } from "@/lib/data/storage";
 import { createDefaultAppData } from "@/lib/data/default-data";
@@ -105,6 +106,8 @@ type AppStore = {
 
   setLectureGuideForStep: (step: CaseStatus, text: string) => void;
   clearLectureGuideForStep: (step: CaseStatus) => void;
+  setNoDividendRequestGuide: (text: string) => void;
+  setPropertyAnalysisSettings: (patch: Partial<PropertyAnalysisSettings>) => void;
 
   addKnowledgeNote: (note: Omit<KnowledgeNote, "id" | "createdAt" | "updatedAt">) => void;
   updateKnowledgeNote: (id: string, patch: Partial<KnowledgeNote>) => void;
@@ -367,6 +370,28 @@ export const useAppStore = create<AppStore>()(
             data: { ...s.data, lectureGuideByStep: cur },
           };
         }),
+
+      setNoDividendRequestGuide: (text) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            tenantAnalysisSettings: {
+              ...s.data.tenantAnalysisSettings,
+              noDividendRequestGuide: text,
+            },
+          },
+        })),
+
+      setPropertyAnalysisSettings: (patch) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            propertyAnalysisSettings: {
+              ...s.data.propertyAnalysisSettings,
+              ...patch,
+            },
+          },
+        })),
 
       addKnowledgeNote: (note) =>
         set((s) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { saveAppStateAction } from "@/app/actions/app-state";
+import { appDataCaseCount } from "@/lib/data/client-backup";
 import { createClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { useAppStore } from "@/store/app-store";
@@ -22,6 +23,7 @@ export function SupabaseAutosave() {
 
     const json = JSON.stringify(data);
     if (json === lastSyncedRef.current) return;
+    if (appDataCaseCount(json) === 0) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
 
