@@ -273,6 +273,27 @@ export function sqmToPyeong(sqm: number | null | undefined): number | null {
   return Math.round((sqm / PYEONG_TO_SQM) * 100) / 100;
 }
 
+export function pyeongToSqm(pyeong: number | null | undefined): number | null {
+  if (pyeong == null || !Number.isFinite(pyeong) || pyeong <= 0) return null;
+  return Math.round(pyeong * PYEONG_TO_SQM * 100) / 100;
+}
+
+export function unitPricePerSqmFromPyeong(
+  perPyeong: number | null | undefined,
+): number | null {
+  if (perPyeong == null || !Number.isFinite(perPyeong) || perPyeong <= 0) {
+    return null;
+  }
+  return Math.round(perPyeong / PYEONG_TO_SQM);
+}
+
+export function unitPricePerPyeongFromSqm(
+  perSqm: number | null | undefined,
+): number | null {
+  if (perSqm == null || !Number.isFinite(perSqm) || perSqm <= 0) return null;
+  return Math.round(perSqm * PYEONG_TO_SQM);
+}
+
 function pct(n: number): number {
   return Math.round(n * 100) / 100;
 }

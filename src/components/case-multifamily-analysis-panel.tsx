@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import type {
   AuctionCase,
@@ -12,7 +12,10 @@ import {
   computeMultiFamilyScore,
   computePreFieldInfoReadiness,
   computeProfitAnalysis,
+  pyeongToSqm,
   sqmToPyeong,
+  unitPricePerPyeongFromSqm,
+  unitPricePerSqmFromPyeong,
   type PreFieldInfoItem,
   type PreFieldInfoReadiness,
   type ScoreFactor,
@@ -21,17 +24,30 @@ import {
   extractCaseDocumentFacts,
   type CaseDocumentFactSummary,
 } from "@/lib/domain/case-document-facts";
-import { formatWonDigits, formatWonWithUnit, parseWonInput } from "@/lib/format/won";
+import { CaseFieldInspectionContacts } from "@/components/case-field-inspection-contacts";
+import { CaseFieldIntelSection } from "@/components/case-field-intel-section";
+import { CaseMarketReferenceNotes } from "@/components/case-market-reference-notes";
+import { CaseNearbyMarketComparables } from "@/components/case-nearby-market-comparables";
+import { HoverHint, LabelWithHint } from "@/components/hover-hint";
+import { normalizeFieldInspection } from "@/lib/domain/field-inspection";
 import {
-  filterPercentInputRaw,
-  formatRatioAsPercentInput,
-  parsePercentInputToRatio,
-} from "@/lib/format/percent-input";
+  explainCategoryScore,
+  explainConfidence,
+  explainGrade,
+  explainTotalScore,
+  FIELD_CHECK_ITEM_HINTS,
+} from "@/lib/domain/score-explanations";
+import { PYEONG_TO_SQM } from "@/lib/domain/rent-setting";
+import { PercentRateInput } from "@/components/percent-rate-input";
+import { formatWonDigits, formatWonWithUnit, parseWonInput } from "@/lib/format/won";
 
 type Props = {
   caseData: AuctionCase;
   onSave: (analysis: MultiFamilyAnalysis) => void;
+  onUpdateCase: (patch: Partial<AuctionCase>) => void;
 };
+
+const AUTO_SAVE_MS = 3000;
 
 const INPUT =
   "mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900";
@@ -105,7 +121,11 @@ const SEARCH_CHECK_ITEMS: {
   { key: "gommuljuYieldFieldChecked", label: "곰물주 방식 수익률표로 임장 검증" },
 ];
 
-export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
+export function CaseMultiFamilyAnalysisPanel({
+  caseData,
+  onSave,
+  onUpdateCase,
+}: Props) {
   const [draftAnalysis, setDraftAnalysis] = useState(caseData.multiFamilyAnalysis);
   const [applied, setApplied] = useState(false);
   const analysis = draftAnalysis;
@@ -134,10 +154,10 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
     () => JSON.stringify(analysis) !== JSON.stringify(caseData.multiFamilyAnalysis),
     [analysis, caseData.multiFamilyAnalysis],
   );
+  const buildingSqm =
+    caseData.rentSetting.grossFloorAreaSqm ?? caseData.buildingAreaSqm;
   const landPyeong = sqmToPyeong(caseData.landAreaSqm);
-  const buildingPyeong = sqmToPyeong(
-    caseData.rentSetting.grossFloorAreaSqm ?? caseData.buildingAreaSqm,
-  );
+  const buildingPyeong = sqmToPyeong(buildingSqm);
   const expectedBidPrice =
     caseData.expectedBidPrice ??
     (caseData.appraisalPrice != null ? Math.round(caseData.appraisalPrice * 0.7) : null);
@@ -182,6 +202,16 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
     window.setTimeout(() => setApplied(false), 1400);
   };
 
+  useEffect(() => {
+    if (!hasPendingChanges) return;
+    const timer = window.setTimeout(() => {
+      onSave(analysis);
+      setApplied(true);
+      window.setTimeout(() => setApplied(false), 1400);
+    }, AUTO_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [analysis, hasPendingChanges, onSave]);
+
   return (
     <section className="space-y-5 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -189,7 +219,7 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
           <h2 className="text-lg font-semibold">다가구 마스터 분석</h2>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
             등록된 물건 정보를 바탕으로 임장 전 점수, 수익률 착시, 시세 하한선,
-            매도가 역산을 함께 확인합니다.
+            매도가 역산을 함께 확인합니다. 변경 사항은 약 3초 후 자동 저장됩니다.
           </p>
         </div>
         <ApplyButton
@@ -201,15 +231,30 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
 
       <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-3">
         <div className="rounded-xl border border-neutral-200 p-3 text-right dark:border-neutral-800">
-          <p className="text-xs text-neutral-500">사전 임장 점수</p>
+          <p className="text-xs text-neutral-500">
+            <LabelWithHint
+              label="사전 임장 점수"
+              hint={explainTotalScore(score.totalScore)}
+            />
+          </p>
           <p className="mt-1 text-3xl font-semibold tabular-nums">
             {score.totalScore}점
           </p>
           <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
             {GRADE_LABEL[score.grade]}
+            <HoverHint
+              text={explainGrade(
+                score.grade,
+                score.totalScore,
+                score.hardFailReasons,
+              )}
+            />
           </p>
           <p className="mt-1 text-xs text-neutral-500">
-            정보 신뢰도 {score.confidencePct}%
+            <LabelWithHint
+              label={`정보 신뢰도 ${score.confidencePct}%`}
+              hint={explainConfidence(score.confidencePct)}
+            />
           </p>
         </div>
         <div className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
@@ -228,7 +273,12 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
         </div>
       </div>
 
-      <PreFieldReadinessPanel readiness={preFieldReadiness} />
+      <CaseNearbyMarketComparables caseData={caseData} analysis={analysis} />
+
+      <CaseMarketReferenceNotes
+        caseData={caseData}
+        onUpdateCase={(patch) => onUpdateCase(patch)}
+      />
 
       <div className="grid gap-3 lg:grid-cols-4">
         {categorySummaries.map((summary) => (
@@ -236,7 +286,16 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
             key={summary.category}
             className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
           >
-            <p className="text-xs text-neutral-500">{summary.category}</p>
+            <p className="text-xs text-neutral-500">
+              <LabelWithHint
+                label={summary.category}
+                hint={explainCategoryScore(
+                  summary.category,
+                  summary.score,
+                  score.factors,
+                )}
+              />
+            </p>
             <p className="mt-1 text-xl font-semibold tabular-nums">
               {summary.score > 0 ? "+" : ""}
               {summary.score}
@@ -269,78 +328,6 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
         </div>
       )}
 
-      <section className="space-y-3 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
-        <div>
-          <h3 className="font-medium">다가구 검색·선별 체크리스트</h3>
-          <p className="mt-1 text-xs text-neutral-500">
-            주택·다가구·근린주택을 감정가 높은 순으로 본 뒤, 관심 저장부터
-            공부·임차·호가·수익률 검증까지 진행 상황을 기록합니다.
-          </p>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {SEARCH_CHECK_ITEMS.map((item) => (
-            <label
-              key={item.key}
-              className="flex items-start gap-2 rounded-lg border border-neutral-100 px-2 py-2 text-sm dark:border-neutral-900"
-            >
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={analysis[item.key]}
-                onChange={(e) => update({ [item.key]: e.target.checked })}
-              />
-              <span>{item.label}</span>
-            </label>
-          ))}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PercentField
-            label="주변 낙찰가율"
-            value={
-              analysis.nearbyAuctionSaleRatePct == null
-                ? null
-                : analysis.nearbyAuctionSaleRatePct / 100
-            }
-            onChange={(v) =>
-              update({
-                nearbyAuctionSaleRatePct:
-                  v == null ? null : Math.round(v * 10000) / 100,
-              })
-            }
-          />
-          <MoneyField
-            label="3개월 대출이자 반영액"
-            value={analysis.threeMonthInterestCost}
-            onChange={(v) => update({ threeMonthInterestCost: v })}
-          />
-          <MoneyField
-            label="중개수수료 반영액"
-            value={analysis.brokerageFee}
-            onChange={(v) => update({ brokerageFee: v })}
-          />
-          <MoneyField
-            label="시설수리비"
-            value={analysis.repairCost}
-            onChange={(v) => update({ repairCost: v })}
-          />
-          <NumberField
-            label="명도 대상 인원"
-            value={analysis.evictionPeopleCount}
-            max={999}
-            onChange={(v) => update({ evictionPeopleCount: v })}
-          />
-          <MoneyField
-            label="예상 명도비용"
-            value={analysis.evictionCost}
-            onChange={(v) => update({ evictionCost: v })}
-          />
-          <Metric
-            label="입찰가 반영 비용 합계"
-            value={formatWonWithUnit(profit.bidCostReserve)}
-          />
-        </div>
-      </section>
-
       <section className="space-y-4 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
         <div>
           <h3 className="font-medium">매각사례분석</h3>
@@ -355,19 +342,13 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
             value={analysis.saleCaseBidPrice}
             onChange={(v) => update({ saleCaseBidPrice: v })}
           />
-          <PercentField
+          <PercentRateInput
             label="인근 낙찰가율"
-            value={
-              analysis.saleCaseBidRatePct == null
-                ? null
-                : analysis.saleCaseBidRatePct / 100
-            }
-            onChange={(v) =>
-              update({
-                saleCaseBidRatePct:
-                  v == null ? null : Math.round(v * 10000) / 100,
-              })
-            }
+            className={`${INPUT} tabular-nums`}
+            valueMode="percent"
+            value={analysis.saleCaseBidRatePct}
+            onChange={(v) => update({ saleCaseBidRatePct: v })}
+            placeholder="예: 72.55"
           />
           <MoneyField
             label="사례 보증금"
@@ -471,17 +452,32 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
           <div className="space-y-3 rounded-lg border border-neutral-100 p-3 dark:border-neutral-900">
             <h4 className="text-sm font-medium">방법 1 · 나대지 + 건축비</h4>
             <p className="text-xs text-neutral-500">
-              현재 토지 {landPyeong ?? "-"}평 · 연면적 {buildingPyeong ?? "-"}평 기준
+              토지 {caseData.landAreaSqm != null ? `${caseData.landAreaSqm}㎡` : "-"}
+              {landPyeong != null ? ` (약 ${landPyeong}평)` : ""} · 연면적{" "}
+              {buildingSqm != null ? `${buildingSqm}㎡` : "-"}
+              {buildingPyeong != null ? ` (약 ${buildingPyeong}평)` : ""} 기준
             </p>
             <MoneyField
-              label="나대지 평단가 (원/평)"
-              value={analysis.profit.landUnitPricePerPyeong}
-              onChange={(v) => updateProfit({ landUnitPricePerPyeong: v })}
+              label="나대지 ㎡단가 (원/㎡)"
+              value={unitPricePerSqmFromPyeong(
+                analysis.profit.landUnitPricePerPyeong,
+              )}
+              onChange={(v) =>
+                updateProfit({
+                  landUnitPricePerPyeong: unitPricePerPyeongFromSqm(v),
+                })
+              }
             />
             <MoneyField
-              label="건축비 평단가 (원/평)"
-              value={analysis.profit.constructionUnitPricePerPyeong}
-              onChange={(v) => updateProfit({ constructionUnitPricePerPyeong: v })}
+              label="건축비 ㎡단가 (원/㎡)"
+              value={unitPricePerSqmFromPyeong(
+                analysis.profit.constructionUnitPricePerPyeong,
+              )}
+              onChange={(v) =>
+                updateProfit({
+                  constructionUnitPricePerPyeong: unitPricePerPyeongFromSqm(v),
+                })
+              }
             />
             <Metric
               label="원가 기준 하한선"
@@ -497,14 +493,25 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
               onChange={(v) => updateProfit({ comparableSalePrice: v })}
             />
             <NumberField
-              label="비교 물건 토지면적 (평)"
-              value={analysis.profit.comparableLandAreaPyeong}
+              label="비교 물건 토지면적 (㎡)"
+              value={pyeongToSqm(analysis.profit.comparableLandAreaPyeong)}
               max={999999}
-              onChange={(v) => updateProfit({ comparableLandAreaPyeong: v })}
+              onChange={(v) =>
+                updateProfit({
+                  comparableLandAreaPyeong:
+                    v != null && v > 0
+                      ? Math.round((v / PYEONG_TO_SQM) * 100) / 100
+                      : null,
+                })
+              }
             />
             <Metric
-              label="역산 토지 평단가"
-              value={formatWonWithUnit(profit.comparableLandUnitPrice)}
+              label="역산 토지 ㎡단가"
+              value={formatWonWithUnit(
+                profit.comparableLandUnitPrice != null
+                  ? unitPricePerSqmFromPyeong(profit.comparableLandUnitPrice)
+                  : null,
+              )}
             />
             <Metric
               label="내 물건 적용 시세"
@@ -589,6 +596,74 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
         </label>
       </section>
 
+      <PreFieldReadinessPanel readiness={preFieldReadiness} />
+
+      <section className="space-y-3 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+        <div>
+          <h3 className="font-medium">다가구 검색·선별 체크리스트</h3>
+          <p className="mt-1 text-xs text-neutral-500">
+            주택·다가구·근린주택을 감정가 높은 순으로 본 뒤, 관심 저장부터
+            공부·임차·호가·수익률 검증까지 진행 상황을 기록합니다.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {SEARCH_CHECK_ITEMS.map((item) => (
+            <label
+              key={item.key}
+              className="flex items-start gap-2 rounded-lg border border-neutral-100 px-2 py-2 text-sm dark:border-neutral-900"
+            >
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={analysis[item.key]}
+                onChange={(e) => update({ [item.key]: e.target.checked })}
+              />
+              <span>{item.label}</span>
+            </label>
+          ))}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <PercentRateInput
+            label="주변 낙찰가율"
+            className={`${INPUT} tabular-nums`}
+            valueMode="percent"
+            value={analysis.nearbyAuctionSaleRatePct}
+            onChange={(v) => update({ nearbyAuctionSaleRatePct: v })}
+            placeholder="예: 68.25"
+          />
+          <MoneyField
+            label="3개월 대출이자 반영액"
+            value={analysis.threeMonthInterestCost}
+            onChange={(v) => update({ threeMonthInterestCost: v })}
+          />
+          <MoneyField
+            label="중개수수료 반영액"
+            value={analysis.brokerageFee}
+            onChange={(v) => update({ brokerageFee: v })}
+          />
+          <MoneyField
+            label="시설수리비"
+            value={analysis.repairCost}
+            onChange={(v) => update({ repairCost: v })}
+          />
+          <NumberField
+            label="명도 대상 인원"
+            value={analysis.evictionPeopleCount}
+            max={999}
+            onChange={(v) => update({ evictionPeopleCount: v })}
+          />
+          <MoneyField
+            label="예상 명도비용"
+            value={analysis.evictionCost}
+            onChange={(v) => update({ evictionCost: v })}
+          />
+          <Metric
+            label="입찰가 반영 비용 합계"
+            value={formatWonWithUnit(profit.bidCostReserve)}
+          />
+        </div>
+      </section>
+
       <div className="flex justify-end border-t border-neutral-200 pt-4 dark:border-neutral-800">
         <ApplyButton
           onClick={applyDraft}
@@ -600,7 +675,42 @@ export function CaseMultiFamilyAnalysisPanel({ caseData, onSave }: Props) {
   );
 }
 
-export function CaseFieldInspectionPanel({ caseData, onSave }: Props) {
+function AreaSummaryCard({
+  label,
+  sqm,
+  pyeong,
+}: {
+  label: string;
+  sqm: number | null;
+  pyeong: number | null;
+}) {
+  return (
+    <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 dark:border-sky-900 dark:bg-sky-950/30">
+      <p className="text-xs font-medium text-sky-900/80 dark:text-sky-200/80">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums text-sky-950 dark:text-sky-50">
+        {sqm != null ? `${sqm.toLocaleString("ko-KR")}㎡` : "미입력"}
+      </p>
+      <p className="mt-0.5 text-xs text-sky-800/70 dark:text-sky-300/70">
+        {pyeong != null ? `참고 약 ${pyeong.toLocaleString("ko-KR")}평` : "기본정보 탭에서 입력"}
+      </p>
+    </div>
+  );
+}
+
+export function CaseFieldInspectionPanel({
+  caseData,
+  onSave,
+  onUpdateCase,
+  onAppendFieldSurvey,
+}: {
+  caseData: AuctionCase;
+  onSave: (analysis: MultiFamilyAnalysis) => void;
+  onUpdateCase?: (patch: Partial<AuctionCase>) => void;
+  onAppendFieldSurvey?: (text: string) => void;
+}) {
+  const fieldInspection = normalizeFieldInspection(caseData.fieldInspection);
   const analysis = caseData.multiFamilyAnalysis;
   const score = useMemo(
     () => computeMultiFamilyScore(caseData, analysis),
@@ -628,6 +738,20 @@ export function CaseFieldInspectionPanel({ caseData, onSave }: Props) {
           부동산에 물어볼 질문을 따로 정리합니다.
         </p>
       </div>
+
+      <CaseFieldIntelSection
+        caseData={caseData}
+        onAppendFieldSurvey={onAppendFieldSurvey}
+      />
+
+      {onUpdateCase && (
+        <CaseFieldInspectionContacts
+          record={fieldInspection}
+          onChange={(next) =>
+            onUpdateCase({ fieldInspection: normalizeFieldInspection(next) })
+          }
+        />
+      )}
 
       <section className="space-y-3 rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
         <div>
@@ -687,37 +811,49 @@ export function CaseFieldInspectionPanel({ caseData, onSave }: Props) {
                 checked={analysis[item.key]}
                 onChange={(e) => update({ [item.key]: e.target.checked })}
               />
-              {item.label}
+              <span className="flex flex-wrap items-center gap-0.5">
+                {item.label}
+                {FIELD_CHECK_ITEM_HINTS[item.key] && (
+                  <HoverHint text={FIELD_CHECK_ITEM_HINTS[item.key]!} />
+                )}
+              </span>
             </label>
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <NumberField
             label="주변 임대 수요 (1~5)"
+            hint={FIELD_CHECK_ITEM_HINTS.nearbyRentalDemandScore}
             value={analysis.nearbyRentalDemandScore}
             max={5}
             onChange={(v) => update({ nearbyRentalDemandScore: v })}
           />
           <NumberField
             label="나라면 살 수 있나 (1~5)"
+            hint={FIELD_CHECK_ITEM_HINTS.subjectiveTenantScore}
             value={analysis.subjectiveTenantScore}
             max={5}
             onChange={(v) => update({ subjectiveTenantScore: v })}
           />
           <NumberField
             label="가스 계량기 잠김 개월"
+            hint={FIELD_CHECK_ITEM_HINTS.gasVacancyMonths}
             value={analysis.gasVacancyMonths}
             max={999}
             onChange={(v) => update({ gasVacancyMonths: v })}
           />
           <NumberField
             label="실제 주차 가능 대수"
+            hint={FIELD_CHECK_ITEM_HINTS.actualParkingCount}
             value={analysis.actualParkingCount}
             max={99999}
             onChange={(v) => update({ actualParkingCount: v })}
           />
           <label className="block text-xs font-medium text-neutral-500">
-            엘리베이터 상태
+            <LabelWithHint
+              label="엘리베이터 상태"
+              hint={FIELD_CHECK_ITEM_HINTS.elevatorWorking ?? ""}
+            />
             <select
               className={INPUT}
               value={
@@ -743,6 +879,7 @@ export function CaseFieldInspectionPanel({ caseData, onSave }: Props) {
           </label>
           <NumberField
             label="임장 후 실제 점수"
+            hint={FIELD_CHECK_ITEM_HINTS.postFieldScore}
             value={analysis.postFieldScore}
             max={150}
             onChange={(v) => update({ postFieldScore: v })}
@@ -950,6 +1087,7 @@ function PreFieldInfoRow({
         <div>
           <p className="font-medium text-neutral-900 dark:text-neutral-100">
             {item.label}
+            <HoverHint text={`${item.description}\n\n${item.impact}`} />
           </p>
           {!compact && (
             <p className="mt-0.5 text-neutral-600 dark:text-neutral-400">
@@ -1122,15 +1260,17 @@ function NumberField({
   value,
   max,
   onChange,
+  hint,
 }: {
   label: string;
   value: number | null;
   max: number;
   onChange: (v: number | null) => void;
+  hint?: string;
 }) {
   return (
     <label className="block text-xs font-medium text-neutral-500">
-      {label}
+      {hint ? <LabelWithHint label={label} hint={hint} /> : label}
       <input
         inputMode="decimal"
         className={`${INPUT} tabular-nums`}
@@ -1159,20 +1299,13 @@ function PercentField({
   onChange: (v: number | null) => void;
 }) {
   return (
-    <label className="block text-xs font-medium text-neutral-500">
-      {label}
-      <input
-        inputMode="decimal"
-        className={`${INPUT} tabular-nums`}
-        value={formatRatioAsPercentInput(value)}
-        onChange={(e) => {
-          const parsed = parsePercentInputToRatio(
-            filterPercentInputRaw(e.target.value),
-          );
-          if (parsed !== "incomplete") onChange(parsed);
-        }}
-      />
-    </label>
+    <PercentRateInput
+      label={label}
+      className={`${INPUT} tabular-nums`}
+      valueMode="ratio"
+      value={value}
+      onChange={onChange}
+    />
   );
 }
 

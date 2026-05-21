@@ -1,3 +1,4 @@
+import { DEFAULT_REMODELING_PRICE_CATALOG } from "@/lib/domain/remodeling-catalog-daejeon";
 import type {
   AppData,
   CaseStatus,
@@ -532,5 +533,7 @@ export function createDefaultAppData(): AppData {
     messageTemplates: structuredClone(DEFAULT_MESSAGE_TEMPLATES),
     knowledgeNotes: [],
     cases: [],
+    guMarketCache: {},
+    remodelingPriceCatalog: structuredClone(DEFAULT_REMODELING_PRICE_CATALOG),
   };
 }

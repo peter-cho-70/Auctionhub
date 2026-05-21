@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
+import { resolveMolitLawdCode } from "@/lib/address/lawd-code";
+import { normalizeCaseAddressMeta } from "@/lib/address/normalize";
+import { geocodeAddress } from "@/lib/map/geocode-server";
+import {
+  buildGuMarketCacheEntry,
+  mergeListings,
+  missingMonths,
+  MOLIT_RENT_MONTHS,
+  MOLIT_SALE_MONTHS,
+} from "@/lib/data/gu-market-cache";
 import { inferDong } from "@/lib/domain/nearby-market";
+import { filterByScope } from "@/lib/domain/nearby-market-comparables";
 import type {
+  GuMarketCacheEntry,
   NearbyMarketAnalysis,
   NearbyMarketListing,
   NearbyMarketRoomSummary,
@@ -10,13 +22,7 @@ export const runtime = "nodejs";
 
 const MOLIT_BASE = "https://apis.data.go.kr/1613000";
 
-const GU_LAWD_CODES: Record<string, string> = {
-  동구: "30110",
-  중구: "30140",
-  서구: "30170",
-  유성구: "30200",
-  대덕구: "30230",
-};
+import { DAEJEON_GU_LAWD_CODES as GU_LAWD_CODES } from "@/lib/address/lawd-code";
 
 const ADJACENT_DONGS: Record<string, string[]> = {
   선화동: ["목동", "은행동", "대흥동", "중촌동", "용두동"],
@@ -60,19 +66,28 @@ function endpointLabel(endpoint: MolitEndpoint): string {
   return `${endpoint.propertyType} ${endpoint.tradeKind === "rent" ? "전월세" : "매매"}`;
 }
 
-const AREA_FIELD_NAMES = [
-  "계약면적",
-  "계약면적(㎡)",
-  "전용면적",
-  "전용면적(㎡)",
+const BUILDING_AREA_FIELD_NAMES = [
   "건물면적",
   "연면적",
-  "대지면적",
-  "area",
-  "dealArea",
-  "excluUseAr",
+  "전용면적",
+  "전용면적(㎡)",
+  "계약면적",
+  "계약면적(㎡)",
+  "buildingAr",
   "totArea",
   "totalFloorAr",
+  "excluUseAr",
+  "dealArea",
+  "area",
+];
+
+const LAND_AREA_FIELD_NAMES = [
+  "대지면적",
+  "토지면적",
+  "대지권면적",
+  "landAr",
+  "platArea",
+  "landArea",
 ];
 
 function text(value: unknown): string {
@@ -207,14 +222,30 @@ async function fetchMolit(endpoint: MolitEndpoint, lawdCode: string, ym: string)
   return normalizeMolitItems(json);
 }
 
+function buildMolitJibunAddress(
+  item: Record<string, unknown>,
+  dong: string,
+): string {
+  const jibun = text(getField(item, ["지번", "jibun"]));
+  if (jibun) return jibun;
+  const bon = numberFromText(getField(item, ["bonbun", "본번", "lnbrMnnm"]));
+  const bu = numberFromText(getField(item, ["bubun", "부번", "lnbrSlno"]));
+  if (bon != null) {
+    return bu != null && bu > 0 ? `${bon}-${bu}` : String(bon);
+  }
+  return dong;
+}
+
 function listingFromMolit(
   item: Record<string, unknown>,
   endpoint: MolitEndpoint,
   index: number,
 ): NearbyMarketListing | null {
   const dong = text(getField(item, ["법정동", "umdNm", "동"]));
-  const area = positive(getField(item, AREA_FIELD_NAMES));
-  if (area == null || area < 5) return null;
+  const buildingAreaSqm = positive(getField(item, BUILDING_AREA_FIELD_NAMES));
+  const landAreaSqm = positive(getField(item, LAND_AREA_FIELD_NAMES));
+  const areaSqm = buildingAreaSqm ?? landAreaSqm;
+  if (areaSqm == null || areaSqm < 5) return null;
   const year = numberFromText(getField(item, ["년", "dealYear"]));
   const month = numberFromText(getField(item, ["월", "dealMonth"]));
   const day = numberFromText(getField(item, ["일", "dealDay"]));
@@ -227,12 +258,14 @@ function listingFromMolit(
     id: `molit-${endpoint.tradeKind}-${index}`,
     source: "molit",
     tradeType,
-    roomType: endpoint.tradeKind === "sale" ? "매매" : roomTypeFromArea(area),
+    roomType: endpoint.tradeKind === "sale" ? "매매" : roomTypeFromArea(areaSqm),
     propertyType: endpoint.propertyType,
     dong,
-    address: text(getField(item, ["지번", "jibun", "address"])) || dong,
+    address: buildMolitJibunAddress(item, dong),
     title: "",
-    areaSqm: area,
+    areaSqm,
+    buildingAreaSqm,
+    landAreaSqm,
     floor: text(getField(item, ["층", "floor"])),
     buildYear: positive(getField(item, ["건축년도", "건축년", "buildYear"])),
     dealAmountManwon: dealAmount,
@@ -261,9 +294,17 @@ function dongRank(item: NearbyMarketListing, targetDong: string): number {
     : 2;
 }
 
+function listingBuildingSqm(item: NearbyMarketListing): number | null {
+  if (item.buildingAreaSqm != null && item.buildingAreaSqm > 0) {
+    return item.buildingAreaSqm;
+  }
+  return item.areaSqm != null && item.areaSqm > 0 ? item.areaSqm : null;
+}
+
 function areaDiffRatio(item: NearbyMarketListing, targetAreaSqm: number | null): number {
-  if (targetAreaSqm == null || targetAreaSqm <= 0 || item.areaSqm == null) return 9;
-  return Math.abs(item.areaSqm - targetAreaSqm) / targetAreaSqm;
+  const listingSqm = listingBuildingSqm(item);
+  if (targetAreaSqm == null || targetAreaSqm <= 0 || listingSqm == null) return 9;
+  return Math.abs(listingSqm - targetAreaSqm) / targetAreaSqm;
 }
 
 function builtYearDiff(item: NearbyMarketListing, targetBuiltYear: number | null): number {
@@ -333,26 +374,57 @@ function roomSummary(roomType: string, listings: NearbyMarketListing[]): NearbyM
   };
 }
 
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
-  const keyId = process.env.NAVER_MAP_CLIENT_ID ?? process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID;
-  const key = process.env.NAVER_MAP_CLIENT_SECRET;
-  if (!keyId || !key || !address.trim()) return null;
-  const url = `https://maps.apigw.ntruss.com/map-geocode/v2/geocode?query=${encodeURIComponent(address)}`;
-  const response = await fetch(url, {
-    headers: {
-      "x-ncp-apigw-api-key-id": keyId,
-      "x-ncp-apigw-api-key": key,
-    },
-    cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const json = (await response.json().catch(() => null)) as
-    | { addresses?: Array<{ x?: string; y?: string }> }
-    | null;
-  const first = json?.addresses?.[0];
-  const lat = numberFromText(first?.y);
-  const lng = numberFromText(first?.x);
-  return lat != null && lng != null ? { lat, lng } : null;
+function parseGuMarketCache(
+  raw: unknown,
+  lawdCode: string,
+): GuMarketCacheEntry | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as GuMarketCacheEntry;
+  if (o.lawdCode !== lawdCode || !Array.isArray(o.listings)) return null;
+  return o;
+}
+
+async function fetchMolitMonthBatch(
+  lawdCode: string,
+  saleYms: string[],
+  rentYms: string[],
+  warnings: string[],
+  startIndex: number,
+): Promise<{ listings: NearbyMarketListing[]; nextIndex: number }> {
+  const saleEndpoints = ENDPOINTS.filter((e) => e.tradeKind === "sale");
+  const rentEndpoints = ENDPOINTS.filter((e) => e.tradeKind === "rent");
+  const tasks: Array<{ ym: string; endpoint: MolitEndpoint }> = [];
+  for (const ym of saleYms) {
+    for (const endpoint of saleEndpoints) tasks.push({ ym, endpoint });
+  }
+  for (const ym of rentYms) {
+    for (const endpoint of rentEndpoints) tasks.push({ ym, endpoint });
+  }
+
+  const out: NearbyMarketListing[] = [];
+  let index = startIndex;
+  const concurrency = 8;
+
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const chunk = tasks.slice(i, i + concurrency);
+    await Promise.all(
+      chunk.map(async ({ ym, endpoint }) => {
+        try {
+          const rows = await fetchMolit(endpoint, lawdCode, ym);
+          for (const row of rows) {
+            const listing = listingFromMolit(row, endpoint, index);
+            index += 1;
+            if (listing) out.push(listing);
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          warnings.push(`${ym} ${endpointLabel(endpoint)} 조회 실패: ${msg}`);
+        }
+      }),
+    );
+  }
+
+  return { listings: out, nextIndex: index };
 }
 
 export async function POST(req: Request) {
@@ -361,10 +433,17 @@ export async function POST(req: Request) {
     const address = text(body.address);
     const gu = text(body.gu) || inferGu(address);
     const dong = text(body.dong) || inferDong(address);
-    const months = Math.max(1, Math.min(12, numberFromText(body.months) ?? 3));
+    const forceRefresh = body.forceRefresh === true;
     const targetAreaSqm = positive(body.buildingAreaSqm ?? body.targetAreaSqm);
     const targetBuiltYear = parseBuiltYear(body.builtYear ?? body.targetBuiltYear);
-    const lawdCode = text(body.lawdCode) || GU_LAWD_CODES[gu];
+    const addressMeta =
+      body.addressMeta && typeof body.addressMeta === "object"
+        ? (body.addressMeta as { molitLawdCode?: string | null })
+        : null;
+    const lawdCode =
+      text(body.lawdCode) ||
+      resolveMolitLawdCode(address, addressMeta) ||
+      GU_LAWD_CODES[gu];
     if (!lawdCode) {
       return NextResponse.json(
         { ok: false, error: "주소에서 대전 구 정보를 찾지 못했습니다." },
@@ -372,38 +451,55 @@ export async function POST(req: Request) {
       );
     }
 
-    const allListings: NearbyMarketListing[] = [];
+    const saleYmsRequired = dealMonths(MOLIT_SALE_MONTHS);
+    const rentYmsRequired = dealMonths(MOLIT_RENT_MONTHS);
+    const cached = !forceRefresh
+      ? parseGuMarketCache(body.guMarketCache, lawdCode)
+      : null;
+
+    let listings = cached ? [...cached.listings] : [];
+    let saleCovered = cached ? [...cached.saleMonthsCovered] : [];
+    let rentCovered = cached ? [...cached.rentMonthsCovered] : [];
+
+    const saleToFetch = forceRefresh
+      ? saleYmsRequired
+      : missingMonths(saleCovered, saleYmsRequired);
+    const rentToFetch = forceRefresh
+      ? rentYmsRequired
+      : missingMonths(rentCovered, rentYmsRequired);
+
     const warnings: string[] = [];
-    let index = 0;
-    for (const ym of dealMonths(months)) {
-      for (const endpoint of ENDPOINTS) {
-        let rows: Record<string, unknown>[] = [];
-        try {
-          rows = await fetchMolit(endpoint, lawdCode, ym);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          warnings.push(`${ym} ${endpointLabel(endpoint)} 조회 실패: ${msg}`);
-          continue;
-        }
-        for (const row of rows) {
-          const listing = listingFromMolit(row, endpoint, index);
-          index += 1;
-          if (!listing) continue;
-          allListings.push(listing);
-        }
-      }
+    if (saleToFetch.length > 0 || rentToFetch.length > 0) {
+      const fetched = await fetchMolitMonthBatch(
+        lawdCode,
+        saleToFetch,
+        rentToFetch,
+        warnings,
+        listings.length,
+      );
+      listings = mergeListings(listings, fetched.listings);
+      saleCovered = [...new Set([...saleCovered, ...saleToFetch])];
+      rentCovered = [...new Set([...rentCovered, ...rentToFetch])];
+    } else if (cached) {
+      warnings.push("구 단위 캐시를 사용했습니다. API 호출을 생략했습니다.");
     }
 
-    const listings = allListings.sort((a, b) =>
+    const sorted = listings.sort((a, b) =>
       compareListings(a, b, dong, targetAreaSqm, targetBuiltYear),
     );
-    const center = await geocodeAddress(address);
-    const saleListings = similarSaleListings(
-      listings,
-      dong,
-      targetAreaSqm,
-      targetBuiltYear,
+    const center = await geocodeAddress(
+      address,
+      body.addressMeta && typeof body.addressMeta === "object"
+        ? normalizeCaseAddressMeta(body.addressMeta)
+        : null,
     );
+    const saleListings = filterByScope(
+      sorted.filter(
+        (item) => item.tradeType === "매매" && item.dealAmountManwon != null,
+      ),
+      dong,
+      "same_dong",
+    ).slice(0, 15);
     const analysis: NearbyMarketAnalysis = {
       importedAt: new Date().toISOString(),
       city: "대전광역시",
@@ -411,19 +507,36 @@ export async function POST(req: Request) {
       dong,
       lat: center?.lat ?? null,
       lng: center?.lng ?? null,
-      months,
+      months: MOLIT_RENT_MONTHS,
+      saleMonths: MOLIT_SALE_MONTHS,
+      rentMonths: MOLIT_RENT_MONTHS,
       naverCount: 0,
-      molitCount: listings.length,
+      molitCount: sorted.length,
       saleAvgMolitManwon: avg(saleListings.map((item) => item.dealAmountManwon)),
       saleAvgNaverManwon: null,
       roomSummaries: ["원룸", "1.5룸", "2룸", "3룸 이상"].map((roomType) =>
-        roomSummary(roomType, listings),
+        roomSummary(roomType, sorted),
       ),
-      listings,
+      listings: sorted,
       geminiInsight: null,
     };
 
-    return NextResponse.json({ ok: true, analysis, warnings });
+    const guMarketCache = buildGuMarketCacheEntry(
+      lawdCode,
+      "대전광역시",
+      gu,
+      sorted,
+      saleCovered,
+      rentCovered,
+    );
+
+    return NextResponse.json({
+      ok: true,
+      analysis,
+      guMarketCache,
+      warnings,
+      cacheUsed: saleToFetch.length === 0 && rentToFetch.length === 0 && !!cached,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json(

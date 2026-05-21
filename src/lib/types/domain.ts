@@ -89,6 +89,8 @@ export interface KnowledgeNote {
   title: string;
   body: string;
   linkedCaseId: string | null;
+  /** 탐문·시장정보 가이드 slug (`field-intel` 페이지) */
+  fieldIntelGuideId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -116,6 +118,17 @@ export interface BuildingUnitComposition {
 }
 
 export type NearbyMarketSource = "naver" | "molit" | "manual";
+
+/** 인근 시세 아래 부동산·AI 참고 메모 (매매/월세/전세 구분) */
+export type MarketReferenceTradeKind = "sale" | "monthly" | "jeonse" | "all";
+
+export interface MarketReferenceNote {
+  id: string;
+  tradeKind: MarketReferenceTradeKind;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
 export type NearbyMarketTradeType = "매매" | "전세" | "월세" | "전월세" | "기타";
 
 export interface NearbyMarketListing {
@@ -127,7 +140,12 @@ export interface NearbyMarketListing {
   dong: string;
   address: string;
   title: string;
+  /** @deprecated 건물면적 우선 — buildingAreaSqm 사용 권장 */
   areaSqm: number | null;
+  /** 실거래 건물·연면적(㎡) — 거래면적 컬럼에 표시 */
+  buildingAreaSqm: number | null;
+  /** 실거래 토지·대지면적(㎡) */
+  landAreaSqm: number | null;
   floor: string;
   buildYear: number | null;
   dealAmountManwon: number | null;
@@ -157,6 +175,17 @@ export interface NearbyMarketGeminiInsight {
   warnings: string[];
 }
 
+/** 구(LAWD_CD) 단위 국토부 실거래 캐시 — 사건마다 API 재호출 방지 */
+export interface GuMarketCacheEntry {
+  lawdCode: string;
+  city: string;
+  gu: string;
+  saleMonthsCovered: string[];
+  rentMonthsCovered: string[];
+  listings: NearbyMarketListing[];
+  importedAt: string;
+}
+
 export interface NearbyMarketAnalysis {
   importedAt: string;
   city: string;
@@ -164,7 +193,12 @@ export interface NearbyMarketAnalysis {
   dong: string;
   lat: number | null;
   lng: number | null;
+  /** @deprecated rentMonths·saleMonths 사용 */
   months: number | null;
+  /** 매매 조회 개월 수 (기본 120) */
+  saleMonths: number | null;
+  /** 전월세 조회 개월 수 (기본 12) */
+  rentMonths: number | null;
   naverCount: number;
   molitCount: number;
   saleAvgMolitManwon: number | null;
@@ -172,6 +206,134 @@ export interface NearbyMarketAnalysis {
   roomSummaries: NearbyMarketRoomSummary[];
   listings: NearbyMarketListing[];
   geminiInsight: NearbyMarketGeminiInsight | null;
+}
+
+export type RemodelingPhase = "phase1" | "phase2" | "phase3";
+
+export type RemodelingOccupancy = "vacant" | "occupied" | "unknown";
+
+/** 임대 호실 유형 (다가구·빌라) */
+export type RemodelingRoomUnitType =
+  | "one_room"
+  | "one_half_room"
+  | "two_room"
+  | "owner"
+  | "unknown";
+
+/** 최소=고효율, balanced=추가 검토, full=전면 */
+export type RemodelingScenarioTier = "minimal" | "balanced" | "full";
+
+export type RemodelingWorkScope = "reuse" | "partial" | "full_replace";
+
+export interface RemodelingRentUpliftByRoom {
+  oneRoom: number;
+  oneHalfRoom: number;
+  twoRoom: number;
+}
+
+export interface RemodelingCatalogItem {
+  key: string;
+  category: string;
+  item: string;
+  workScope: RemodelingWorkScope;
+  materialManwon: number;
+  laborManwon: number;
+  diy: boolean;
+  effectNote: string;
+  /** 포함 시나리오 */
+  scenarioTiers: RemodelingScenarioTier[];
+  rentUpliftManwon: RemodelingRentUpliftByRoom;
+  /** 월세상승/비용 — 최소 패키지 선정용 */
+  efficiencyScore: number;
+}
+
+/** 지역별 리모델링 단가·효과 (시장조사 반영) */
+export interface RemodelingPriceCatalog {
+  regionId: string;
+  regionLabel: string;
+  sourceNote: string;
+  updatedAt: string;
+  items: RemodelingCatalogItem[];
+}
+
+export interface RemodelingCheckItem {
+  id: string;
+  label: string;
+  method: string;
+  okCriteria: string;
+  action: string;
+  done: boolean;
+  note: string;
+}
+
+export interface RemodelingCostLine {
+  id: string;
+  /** 카탈로그 키 (대전 기본단가 연동) */
+  catalogKey: string | null;
+  item: string;
+  materialManwon: number | null;
+  laborManwon: number | null;
+  selected: boolean;
+  diy: boolean;
+  workScope: RemodelingWorkScope | null;
+  effectNote: string;
+  rentUpliftManwon: number | null;
+}
+
+/** @deprecated 호실별 편집 — 마이그레이션 후 unitAssignments 사용 */
+export interface UnitRemodeling {
+  unitKey: string;
+  unitLabel: string;
+  roomUnitType: RemodelingRoomUnitType;
+  scenarioTier: RemodelingScenarioTier;
+  phase: RemodelingPhase;
+  occupancy: RemodelingOccupancy;
+  checklist: RemodelingCheckItem[];
+  costLines: RemodelingCostLine[];
+  memo: string;
+  completed: boolean;
+}
+
+/** 룸 구성(원룸·1.5룸 등)별 수리 패키지 — 호실 라벨 없음 */
+export interface RemodelingRoomProfile {
+  profileKey: string;
+  roomUnitType: RemodelingRoomUnitType;
+  label: string;
+  costLines: RemodelingCostLine[];
+  memo: string;
+}
+
+/** 시나리오(최소·균형·전면)별 건물 분석 단위 */
+export interface RemodelingScenarioPlan {
+  tier: RemodelingScenarioTier;
+  roomProfiles: RemodelingRoomProfile[];
+  buildingCostLines: RemodelingCostLine[];
+  memo: string;
+}
+
+/** 호실별 적용 여부 (나중 결정) */
+export interface UnitRemodelingAssignment {
+  unitKey: string;
+  unitLabel: string;
+  roomUnitType: RemodelingRoomUnitType;
+  apply: boolean;
+  profileKey: string | null;
+  scenarioTier: RemodelingScenarioTier | null;
+  occupancy: RemodelingOccupancy;
+  memo: string;
+  completed: boolean;
+}
+
+export interface CaseRemodeling {
+  activeScenarioTier: RemodelingScenarioTier;
+  scenarios: RemodelingScenarioPlan[];
+  unitAssignments: UnitRemodelingAssignment[];
+  memo: string;
+  updatedAt: string;
+  /** @deprecated 마이그레이션용 */
+  units?: UnitRemodeling[];
+  /** @deprecated 마이그레이션용 */
+  buildingCostLines?: RemodelingCostLine[];
 }
 
 /** 호실별 임대 (엑셀 하단 표와 유사) */
@@ -244,6 +406,69 @@ export interface RentSetting {
 }
 
 export type PreFieldDecisionGrade = "A" | "B" | "C" | "D" | "F";
+
+export type FieldContactDistance =
+  | "within_100m"
+  | "within_250m"
+  | "within_500m"
+  | "same_block"
+  | "unknown";
+
+export type ManagementServiceScopeKey =
+  | "cleaning"
+  | "vacant_access"
+  | "repair_coordination"
+  | "arrears_ledger"
+  | "tenant_contact"
+  | "remote_management"
+  | "rent_leasing"
+  | "other";
+
+export type ManagementOfficeLocation = "in_building" | "off_site" | "unknown";
+
+export interface BuildingManagementContact {
+  companyName: string;
+  contactName: string;
+  phone: string;
+  serviceScopes: ManagementServiceScopeKey[];
+  serviceScopeOther: string;
+  monthlyFeePerUnitManwon: number | null;
+  vacantAccessAvailable: boolean | null;
+  arrearsLedgerAvailable: boolean | null;
+  remoteManagement: boolean | null;
+  postAuctionCooperation: boolean | null;
+  visitedAt: string | null;
+  reliabilityScore: number | null;
+  memo: string;
+}
+
+export interface NearbyBrokerContact {
+  id: string;
+  agencyName: string;
+  ownerName: string;
+  phone: string;
+  distance: FieldContactDistance;
+  isMultifamilySpecialist: boolean | null;
+  rentOpinion: string;
+  saleOpinion: string;
+  willManageAfterAcquisition: boolean | null;
+  contactedAt: string | null;
+  memo: string;
+}
+
+export interface FieldInspectionRecord {
+  visitDate: string | null;
+  visitDurationMin: number | null;
+  companions: string;
+  buildingManagement: BuildingManagementContact;
+  nearbyBrokers: NearbyBrokerContact[];
+  cleaningCompanyName: string;
+  cleaningCompanyPhone: string;
+  managementOfficeLocation: ManagementOfficeLocation | null;
+  vacantUnitAccessNote: string;
+  memo: string;
+  updatedAt: string;
+}
 
 export type TargetYieldMode = "pure" | "general";
 
@@ -342,6 +567,50 @@ export interface CaseSourceDocument {
   importedAt: string;
 }
 
+/** 행안부 도로명주소 API 선택 결과 (표준화 주소) */
+export interface CaseAddressMeta {
+  roadAddress: string | null;
+  jibunAddress: string | null;
+  /** 법정동코드 10자리 (admCd) */
+  legalDongCode: string | null;
+  /** 시도·시군구명 (표시용) */
+  siNm: string | null;
+  sggNm: string | null;
+  /** 읍면동명 */
+  emdNm: string | null;
+  zipNo: string | null;
+  /** 본번·부번 (지번) */
+  bonbun: number | null;
+  bubun: number | null;
+  /** 필지고유번호 19자리 (산지 여부 반영) */
+  pnu: string | null;
+  /** 국토부 실거래 LAWD_CD 5자리 (대전 구 매핑 등) */
+  molitLawdCode: string | null;
+  /** UTM-K 좌표 (행안부 entX/entY) */
+  entX: string | null;
+  entY: string | null;
+  resolvedAt: string | null;
+}
+
+export function emptyCaseAddressMeta(): CaseAddressMeta {
+  return {
+    roadAddress: null,
+    jibunAddress: null,
+    legalDongCode: null,
+    siNm: null,
+    sggNm: null,
+    emdNm: null,
+    zipNo: null,
+    bonbun: null,
+    bubun: null,
+    pnu: null,
+    molitLawdCode: null,
+    entX: null,
+    entY: null,
+    resolvedAt: null,
+  };
+}
+
 export interface AuctionCase {
   id: string;
   createdAt: string;
@@ -349,6 +618,8 @@ export interface AuctionCase {
   sourceUrl: string;
   caseNumber: string;
   address: string;
+  /** 행안부 주소 검색으로 확정한 표준 주소·법정동·PNU 등 */
+  addressMeta: CaseAddressMeta | null;
   propertyType: string;
   /** 준공·건축연도 등 (물건 기본 정보, 자유 입력) */
   builtYear: string;
@@ -395,6 +666,8 @@ export interface AuctionCase {
   priority: Priority;
   /** 임장 조사 메모 (현장 확인·부동산 문의 등) */
   fieldSurvey: string;
+  /** 임장 현장 연락처·관리업체·주변 부동산 구조화 기록 */
+  fieldInspection: FieldInspectionRecord;
   memo: string;
   /** PDF/JSON 등 등록 당시 원문 자료 */
   sourceDocuments: CaseSourceDocument[];
@@ -404,6 +677,12 @@ export interface AuctionCase {
   multiFamilyAnalysis: MultiFamilyAnalysis;
   /** 주변 월세·전세·매매 시세 분석 결과 */
   nearbyMarketAnalysis: NearbyMarketAnalysis | null;
+  /** 부동산 상담·호가 참고 (인근 시세 아래) */
+  brokerMarketNotes: MarketReferenceNote[];
+  /** AI·자료 분석 참고 (인근 시세 아래) */
+  aiMarketNotes: MarketReferenceNote[];
+  /** 호실·건물 리모델링 체크리스트·비용 산출 */
+  remodeling: CaseRemodeling;
   checklists: CaseChecklist[];
   decision: CaseDecision;
 }
@@ -425,6 +704,10 @@ export interface AppData {
   messageTemplates: MessageTemplate[];
   knowledgeNotes: KnowledgeNote[];
   cases: AuctionCase[];
+  /** LAWD_CD(5자리) 키 → 구 단위 MOLIT 실거래 캐시 */
+  guMarketCache: Record<string, GuMarketCacheEntry>;
+  /** 리모델링 공종별 기본 단가 (대전 등) */
+  remodelingPriceCatalog: RemodelingPriceCatalog;
 }
 
 export const EMPTY_DECISION: CaseDecision = {

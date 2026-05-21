@@ -1,3 +1,4 @@
+import { summarizeFieldInspectionForSurvey } from "@/lib/domain/field-inspection";
 import type { AuctionCase } from "@/lib/types/domain";
 import { ROOM_SHAPE_OPTIONS } from "@/lib/types/domain";
 import { formatWonWithUnit, parseWonInput } from "@/lib/format/won";
@@ -79,6 +80,13 @@ function formatViolationLabel(v: boolean): string {
   return v ? "있음" : "없음";
 }
 
+function buildFieldSurveyText(c: AuctionCase): string {
+  const structured = summarizeFieldInspectionForSurvey(c.fieldInspection);
+  const free = (c.fieldSurvey ?? "").trim();
+  if (structured && free) return `${structured}\n\n${free}`;
+  return structured || free;
+}
+
 /** 감정가 비교·비율용: 물건 기본이 비면 임대세팅 투자 감정가 사용 */
 export function effectiveAppraisalForRatio(c: AuctionCase): number | null {
   const fromCase = c.appraisalPrice;
@@ -134,7 +142,7 @@ export function buildTemplateContext(
     용적율: c.floorAreaRatio || "",
     말소기준: c.lienBaseline || "",
     가구형태: formatRoomShapeSummary(c.roomShapeMix) || "",
-    임장조사: c.fieldSurvey || "",
+    임장조사: buildFieldSurveyText(c),
     감정가: formatMoney(appraisal ?? c.appraisalPrice),
     최저가: formatMoney(c.minPrice),
     입찰일: formatDate(c.bidDate),

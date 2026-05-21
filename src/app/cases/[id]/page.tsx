@@ -6,6 +6,7 @@ import type { InputHTMLAttributes } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import { PercentRateInput } from "@/components/percent-rate-input";
 import { STATUS_LABELS } from "@/lib/domain/status-labels";
 import {
   buildTemplateContext,
@@ -24,11 +25,24 @@ import type {
   BidRoundResult,
   BuildingUnitComposition,
   BuildingUnitUseType,
+  CaseAddressMeta,
+  GuMarketCacheEntry,
   CaseSourceDocument,
   CaseSourceDocumentKind,
+  CaseRemodeling,
   CaseStatus,
   PriorityLevel,
 } from "@/lib/types/domain";
+import { AddressSearchField } from "@/components/address-search-field";
+import { resolveMolitLawdCode } from "@/lib/address/lawd-code";
+import { guMarketCacheKey } from "@/lib/data/gu-market-cache";
+import {
+  molitGisUrl,
+  naverLandSearchUrl,
+  naverMapSearchUrl,
+  preferLandSearchAddress,
+} from "@/lib/map/external-links";
+import { ExternalMapLinks } from "@/components/external-map-links";
 import {
   emptyRoomShapeMix,
   ROOM_SHAPE_OPTIONS,
@@ -38,6 +52,7 @@ import {
   CaseFieldInspectionPanel,
   CaseMultiFamilyAnalysisPanel,
 } from "@/components/case-multifamily-analysis-panel";
+import { CaseRemodelingPanel } from "@/components/case-remodeling-panel";
 import {
   computeRentSettingDerived,
   newRentUnitRow,
@@ -48,6 +63,7 @@ import {
   computePreFieldInfoReadiness,
   normalizeMultiFamilyAnalysis,
 } from "@/lib/domain/multifamily-analysis";
+import { normalizeCaseRemodeling } from "@/lib/domain/remodeling";
 import {
   buildSuggestedRentRows,
   formatManwon,
@@ -76,6 +92,7 @@ type Tab =
   | "multi_family"
   | "market_analysis"
   | "tenant_analysis"
+  | "remodeling"
   | "field_inspection"
   | "source_docs"
   | "checklists"
@@ -91,13 +108,14 @@ const TAB_KEYS: Tab[] = [
   "multi_family",
   "market_analysis",
   "tenant_analysis",
+  "rent",
+  "remodeling",
   "field_inspection",
   "checklists",
   "rounds",
   "decision",
   "templates",
   "tools",
-  "rent",
 ];
 
 const MONEY_EXTRA_KEYS = ["낙찰가", "보증금", "내입찰가"] as const;
@@ -148,15 +166,6 @@ function basicInputClass(missing: boolean, extra = ""): string {
   return `${BASIC_INPUT_CLASS} ${extra} ${missing ? BASIC_INPUT_MISSING_CLASS : ""}`.trim();
 }
 
-function parsePercentNumberInput(raw: string): number | null {
-  const trimmed = raw.replace(/%/g, "").replace(",", ".").trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) && parsed >= 0
-    ? Math.round(Math.min(parsed, 999) * 100) / 100
-    : null;
-}
-
 function BasicFieldLabel({
   children,
   missing,
@@ -199,54 +208,6 @@ function PropertyBadge({
     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${className}`}>
       {children}
     </span>
-  );
-}
-
-function mapSearchUrl(provider: "naver" | "kakao" | "molit" | "naverLand", address: string): string {
-  const q = encodeURIComponent(address.trim());
-  if (provider === "naver") return `https://map.naver.com/p/search/${q}`;
-  if (provider === "kakao") return `https://map.kakao.com/?q=${q}`;
-  if (provider === "naverLand") return `https://new.land.naver.com/search?ms=37.3595704,127.105399,15&a=VL:DDDGG:JWJT:SG&e=RETAIL&query=${q}`;
-  return "https://rt.molit.go.kr/pt/gis/gis.do?srhThingSecd=A&mobileAt=";
-}
-
-function ExternalReferenceLinks({ address }: { address: string }) {
-  const trimmed = address.trim();
-  const disabled = !trimmed;
-  const links = [
-    { label: "네이버 지도", url: mapSearchUrl("naver", trimmed) },
-    { label: "카카오맵", url: mapSearchUrl("kakao", trimmed) },
-    { label: "국토부 실거래", url: mapSearchUrl("molit", trimmed) },
-    { label: "네이버 부동산", url: mapSearchUrl("naverLand", trimmed) },
-  ];
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {links.map((link) =>
-        disabled ? (
-          <span
-            key={link.label}
-            className="rounded-lg border border-neutral-200 px-2.5 py-1.5 text-xs text-neutral-400 dark:border-neutral-800"
-          >
-            {link.label}
-          </span>
-        ) : (
-          <a
-            key={link.label}
-            href={link.url}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-900"
-          >
-            {link.label}
-          </a>
-        ),
-      )}
-      {disabled && (
-        <span className="text-xs text-neutral-500">
-          주소를 입력하면 지도·시세 참고 사이트를 바로 열 수 있습니다.
-        </span>
-      )}
-    </div>
   );
 }
 
@@ -455,9 +416,13 @@ export default function CaseDetailPage() {
   const setPropertyAnalysisSettings = useAppStore(
     (s) => s.setPropertyAnalysisSettings,
   );
+  const remodelingPriceCatalog = useAppStore((s) => s.data.remodelingPriceCatalog);
+  const setRemodelingPriceCatalog = useAppStore((s) => s.setRemodelingPriceCatalog);
 
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "basic";
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (isTab(fromUrl)) return fromUrl;
     const saved = window.localStorage.getItem(`${LAST_CASE_TAB_KEY_PREFIX}${id}`);
     return isTab(saved) ? saved : "basic";
   });
@@ -504,6 +469,11 @@ export default function CaseDetailPage() {
   useEffect(() => {
     window.localStorage.setItem(`${LAST_CASE_TAB_KEY_PREFIX}${id}`, tab);
   }, [id, tab]);
+
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (isTab(fromUrl)) setTab(fromUrl);
+  }, [id]);
 
   // 물건 저장값이 바뀌면 입력칸과 맞춤 (같은 사건에서 갱신될 때)
   /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- 면적·주차만 저장값과 동기화 */
@@ -592,6 +562,7 @@ export default function CaseDetailPage() {
     updateCase(id, {
       caseNumber: caseForForm.caseNumber ?? "",
       address: caseForForm.address ?? "",
+      addressMeta: caseForForm.addressMeta ?? null,
       propertyType: caseForForm.propertyType ?? "",
       builtYear: caseForForm.builtYear ?? "",
       floor: caseForForm.floor ?? "",
@@ -656,6 +627,19 @@ export default function CaseDetailPage() {
     analysis: Parameters<typeof normalizeMultiFamilyAnalysis>[0],
   ) => {
     updateCase(id, { multiFamilyAnalysis: normalizeMultiFamilyAnalysis(analysis) });
+  };
+
+  const saveRemodeling = (remodeling: CaseRemodeling) => {
+    updateCase(id, { remodeling: normalizeCaseRemodeling(remodeling) });
+  };
+
+  const applyRemodelingRepairCost = (totalManwon: number) => {
+    updateCase(id, {
+      multiFamilyAnalysis: normalizeMultiFamilyAnalysis({
+        ...c.multiFamilyAnalysis,
+        repairCost: totalManwon * 10_000,
+      }),
+    });
   };
   const updateBasicSaleCaseAnalysis = (
     patch: Partial<typeof c.multiFamilyAnalysis>,
@@ -740,13 +724,14 @@ export default function CaseDetailPage() {
     { key: "multi_family", label: "다가구 분석" },
     { key: "market_analysis", label: "주변 시세 분석" },
     { key: "tenant_analysis", label: "세입자 분석" },
+    { key: "rent", label: "임대세팅" },
+    { key: "remodeling", label: "리모델링" },
     { key: "field_inspection", label: "임장 확인" },
     { key: "checklists", label: "체크리스트" },
     { key: "rounds", label: "입찰·유찰 회차" },
     { key: "decision", label: "판단 기록" },
     { key: "templates", label: "문자·템플릿" },
     { key: "tools", label: "도구" },
-    { key: "rent", label: "임대세팅" },
   ];
 
   return (
@@ -971,17 +956,29 @@ export default function CaseDetailPage() {
               <BasicFieldLabel missing={basicPreFieldMissing.has("address")}>
                 주소
               </BasicFieldLabel>
-              <input
-                className={basicInputClass(basicPreFieldMissing.has("address"))}
-                value={(caseForForm ?? c).address}
-                onChange={(e) =>
+              <AddressSearchField
+                address={(caseForForm ?? c).address ?? ""}
+                addressMeta={(caseForForm ?? c).addressMeta ?? null}
+                inputClassName={basicInputClass(basicPreFieldMissing.has("address"))}
+                onAddressChange={(next) =>
                   setBasicDraft({
                     ...(caseForForm ?? c),
-                    address: e.target.value,
+                    address: next,
+                  })
+                }
+                onAddressMetaChange={(meta) =>
+                  setBasicDraft({
+                    ...(caseForForm ?? c),
+                    addressMeta: meta,
                   })
                 }
               />
-              <ExternalReferenceLinks address={(caseForForm ?? c).address ?? ""} />
+              <ExternalMapLinks
+                address={(caseForForm ?? c).address ?? ""}
+                addressMeta={(caseForForm ?? c).addressMeta}
+                mapLat={c.nearbyMarketAnalysis?.lat}
+                mapLng={c.nearbyMarketAnalysis?.lng}
+              />
             </div>
             <div className="grid gap-3 sm:grid-cols-4 sm:col-span-2">
               <div>
@@ -1546,16 +1543,18 @@ export default function CaseDetailPage() {
                 </label>
                 <label className="text-xs font-medium text-sky-900 dark:text-sky-100">
                   인근 낙찰가율 (%)
-                  <input
-                    inputMode="decimal"
+                  <PercentRateInput
                     className="mt-1 w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm tabular-nums text-neutral-900 dark:border-sky-900 dark:bg-neutral-950 dark:text-neutral-100"
-                    value={saleCaseAnalysis.saleCaseBidRatePct ?? ""}
-                    onChange={(e) =>
-                      updateBasicSaleCaseAnalysis({
-                        saleCaseBidRatePct: parsePercentNumberInput(e.target.value),
-                      })
+                    valueMode="percent"
+                    value={saleCaseAnalysis.saleCaseBidRatePct}
+                    onChange={(v) =>
+                      updateBasicSaleCaseAnalysis({ saleCaseBidRatePct: v })
                     }
-                    placeholder={saleCaseRate != null ? saleCaseRate.toFixed(1) : "예: 72.5"}
+                    placeholder={
+                      saleCaseRate != null
+                        ? saleCaseRate.toFixed(2)
+                        : "예: 72.55"
+                    }
                   />
                 </label>
                 <label className="text-xs font-medium text-sky-900 dark:text-sky-100">
@@ -1735,6 +1734,7 @@ export default function CaseDetailPage() {
           key={id}
           caseData={viewCase}
           onSave={saveMultiFamilyAnalysis}
+          onUpdateCase={(patch) => updateCase(id, patch)}
         />
       )}
 
@@ -1768,11 +1768,33 @@ export default function CaseDetailPage() {
         />
       )}
 
+      {tab === "remodeling" && (
+        <CaseRemodelingPanel
+          key={id}
+          caseData={viewCase}
+          priceCatalog={remodelingPriceCatalog}
+          onSaveCatalog={setRemodelingPriceCatalog}
+          onSave={saveRemodeling}
+          onApplyRepairCost={applyRemodelingRepairCost}
+        />
+      )}
+
       {tab === "field_inspection" && (
         <CaseFieldInspectionPanel
           key={id}
           caseData={viewCase}
           onSave={saveMultiFamilyAnalysis}
+          onUpdateCase={(patch) => {
+            updateCase(id, patch);
+            syncDraftFromCase();
+          }}
+          onAppendFieldSurvey={(text) => {
+            const base = (c.fieldSurvey ?? "").trim();
+            updateCase(id, {
+              fieldSurvey: base ? `${base}\n\n${text}` : text,
+            });
+            syncDraftFromCase();
+          }}
         />
       )}
 
@@ -2150,8 +2172,10 @@ function NearbyMarketAnalysisPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [rentCondition, setRentCondition] = useState<RentCondition>("pre_field");
   const [marketBusy, setMarketBusy] = useState(false);
-  const [marketMonths, setMarketMonths] = useState(3);
+  const guMarketCache = useAppStore((s) => s.data.guMarketCache);
+  const setGuMarketCache = useAppStore((s) => s.setGuMarketCache);
   const analysis = caseData.nearbyMarketAnalysis;
+  const hasMolitMarketData = marketMolitDataAppliesToCase(caseData);
   const sortedListings = analysis
     ? sortMarketListingsForCase(analysis.listings, caseData)
     : [];
@@ -2180,11 +2204,24 @@ function NearbyMarketAnalysisPanel({
     }
   };
 
-  const fetchNearbyMarket = async () => {
+  const fetchNearbyMarket = async (forceRefresh = false) => {
     if (!caseData.address.trim()) {
       setMessage("주소를 먼저 입력하세요.");
       return;
     }
+    if (hasMolitMarketData && !forceRefresh) {
+      setMessage(
+        "이 물건에 국토부 주변 시세가 이미 있습니다. 다시 조회하려면 「분석 데이터 제거」 또는 「구 캐시 갱신」을 사용하세요.",
+      );
+      return;
+    }
+    const lawdCode = resolveMolitLawdCode(
+      caseData.address,
+      caseData.addressMeta,
+    );
+    const cacheKey = lawdCode ? guMarketCacheKey(lawdCode) : "";
+    const cached = cacheKey ? guMarketCache[cacheKey] : undefined;
+
     setMarketBusy(true);
     setMessage(null);
     try {
@@ -2193,13 +2230,22 @@ function NearbyMarketAnalysisPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           address: caseData.address,
-          months: marketMonths,
+          addressMeta: caseData.addressMeta,
+          lawdCode: lawdCode ?? undefined,
+          guMarketCache: cached,
+          forceRefresh,
           buildingAreaSqm: caseData.buildingAreaSqm,
           builtYear: caseData.builtYear,
         }),
       });
       const json = (await response.json()) as
-        | { ok: true; analysis: unknown; warnings?: string[] }
+        | {
+            ok: true;
+            analysis: unknown;
+            guMarketCache?: unknown;
+            warnings?: string[];
+            cacheUsed?: boolean;
+          }
         | { ok: false; error: string };
       if (!json.ok) {
         setMessage(json.error || "주변 시세 조회에 실패했습니다.");
@@ -2211,14 +2257,22 @@ function NearbyMarketAnalysisPanel({
         return;
       }
       onImport(parsed);
+      if (
+        json.guMarketCache &&
+        typeof json.guMarketCache === "object" &&
+        "lawdCode" in (json.guMarketCache as object)
+      ) {
+        setGuMarketCache(json.guMarketCache as GuMarketCacheEntry);
+      }
       const warningText =
         json.warnings && json.warnings.length > 0
-          ? ` 일부 자료는 제외됨: ${json.warnings.slice(0, 2).join(" / ")}`
+          ? ` ${json.warnings.slice(0, 2).join(" / ")}`
           : "";
+      const cacheNote = json.cacheUsed ? " (구 캐시 재사용)" : "";
       setMessage(
         parsed.molitCount > 0
-          ? `국토부 실거래 ${parsed.molitCount}건을 조회했습니다.${warningText}`
-          : `조회는 완료됐지만 해당 주소 주변 실거래가 없습니다. 주소의 구/동 또는 조회 기간을 확인해 주세요.${warningText}`,
+          ? `국토부 실거래 ${parsed.molitCount}건 (매매 10년·전월세 1년)${cacheNote}.${warningText}`
+          : `조회는 완료됐지만 해당 구 실거래가 없습니다.${warningText}`,
       );
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "주변 시세 조회에 실패했습니다.");
@@ -2228,6 +2282,12 @@ function NearbyMarketAnalysisPanel({
   };
 
   const reuseNearbyMarket = (sourceCase: AuctionCase) => {
+    if (hasMolitMarketData) {
+      setMessage(
+        "이 물건에 국토부 주변 시세가 이미 있습니다. 다른 물건 시세를 쓰려면 「분석 데이터 제거」 후 진행하세요.",
+      );
+      return;
+    }
     if (!sourceCase.nearbyMarketAnalysis) return;
     const reused = buildReusedNearbyMarketAnalysis(sourceCase, caseData);
     if (!reused) {
@@ -2279,40 +2339,61 @@ function NearbyMarketAnalysisPanel({
         <div className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
           <p className="text-sm font-medium">국토부 실거래 바로 조회</p>
           <p className="mt-1 text-xs text-neutral-500">
-            주소에서 구/동을 추정해 최근 전월세·매매 실거래를 조회합니다.
-            조회 결과는 이 물건의 주변 시세 분석에만 저장됩니다.
+            매매 <strong>10년</strong>·전월세 <strong>1년</strong>을 구 단위로
+            수집합니다. 같은 구는 캐시를 재사용해 API 호출을 줄입니다. 월세·전세
+            탭에서 표시는 3/6/12개월을 선택할 수 있습니다.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="text-xs font-medium text-neutral-500">
-              조회 기간
-              <select
-                className="mt-1 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-xs dark:border-neutral-700 dark:bg-neutral-900"
-                value={marketMonths}
-                onChange={(e) => setMarketMonths(Number(e.target.value))}
-              >
-                <option value={3}>최근 3개월</option>
-                <option value={6}>최근 6개월</option>
-                <option value={12}>최근 12개월</option>
-              </select>
-            </label>
             <button
               type="button"
-              onClick={() => void fetchNearbyMarket()}
-              disabled={marketBusy || !caseData.address.trim()}
+              onClick={() => void fetchNearbyMarket(false)}
+              disabled={marketBusy || !caseData.address.trim() || hasMolitMarketData}
+              title={
+                hasMolitMarketData
+                  ? "분석 데이터 제거 후 다시 조회할 수 있습니다."
+                  : undefined
+              }
               className="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
             >
-              {marketBusy ? "조회 중..." : "주변 시세 조회"}
+              {marketBusy
+                ? "조회 중..."
+                : hasMolitMarketData
+                  ? "주변 시세 조회됨"
+                  : "주변 시세 조회 (10년·1년)"}
             </button>
+            {hasMolitMarketData && (
+              <button
+                type="button"
+                onClick={() => void fetchNearbyMarket(true)}
+                disabled={marketBusy || !caseData.address.trim()}
+                className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+              >
+                {marketBusy ? "갱신 중…" : "구 캐시 갱신"}
+              </button>
+            )}
             <a
-              href={`https://rt.molit.go.kr/pt/gis/gis.do?srhThingSecd=A&mobileAt=`}
+              href={molitGisUrl()}
               target="_blank"
               rel="noreferrer"
               className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs dark:border-neutral-700"
             >
-              국토부 원문 확인
+              국토부 GIS
+            </a>
+            <a
+              href={naverLandSearchUrl(
+                preferLandSearchAddress(caseData.address, caseData.addressMeta),
+                analysis?.lat,
+                analysis?.lng,
+                caseData.addressMeta?.legalDongCode,
+              )}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs dark:border-neutral-700"
+            >
+              네이버 부동산 지도
             </a>
           </div>
-          {reusableMarketCases.length > 0 && (
+          {!hasMolitMarketData && reusableMarketCases.length > 0 && (
             <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
               <p className="font-medium">같은 구 기존 시세 재사용</p>
               <p className="mt-1 opacity-80">
@@ -2935,6 +3016,17 @@ function caseGu(address: string): string {
   return ["동구", "중구", "서구", "유성구", "대덕구"].find((gu) => address.includes(gu)) ?? "";
 }
 
+/** 이 물건에 국토부 주변 시세가 이미 붙어 있으면 API 재조회 불필요 */
+function marketMolitDataAppliesToCase(caseData: AuctionCase): boolean {
+  const analysis = caseData.nearbyMarketAnalysis;
+  if (!analysis?.listings?.length) return false;
+  const hasMolit = analysis.listings.some((item) => item.source === "molit");
+  if (!hasMolit) return false;
+  const gu = caseGu(caseData.address);
+  if (gu && analysis.gu && analysis.gu !== gu) return false;
+  return true;
+}
+
 function findReusableMarketCases(allCases: AuctionCase[], targetCase: AuctionCase): AuctionCase[] {
   const gu = caseGu(targetCase.address);
   if (!gu) return [];
@@ -3237,9 +3329,7 @@ function NearbyMarketMap({
             </p>
           </div>
           <a
-            href={`https://map.naver.com/p/search/${encodeURIComponent(
-              caseData.address || dong,
-            )}`}
+            href={naverMapSearchUrl(caseData.address || dong)}
             target="_blank"
             rel="noreferrer"
             className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
@@ -3260,9 +3350,11 @@ function NearbyMarketMap({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">지도 연동</p>
         <a
-          href={`https://map.naver.com/p/search/${encodeURIComponent(
+          href={naverMapSearchUrl(
             caseData.address || dong,
-          )}`}
+            centerLat,
+            centerLng,
+          )}
           target="_blank"
           rel="noreferrer"
           className="text-xs font-medium text-sky-700 underline dark:text-sky-300"

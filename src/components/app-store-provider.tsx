@@ -5,8 +5,10 @@ import {
   loadAppStateAction,
   saveAppStateAction,
 } from "@/app/actions/app-state";
+import { LocalDataAutosnapshot } from "@/components/local-data-autosnapshot";
 import { SupabaseAutosave } from "@/components/supabase-autosave";
 import { saveLocalDataSnapshot } from "@/lib/data/client-backup";
+import { loadBundledSeedIfEmpty } from "@/lib/data/seed-bootstrap";
 import { createClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { useAppStore } from "@/store/app-store";
@@ -52,6 +54,8 @@ export function AppStoreProvider({
         }
       }
 
+      await loadBundledSeedIfEmpty();
+
       setReady(true);
     })();
   }, []);
@@ -67,6 +71,7 @@ export function AppStoreProvider({
   return (
     <>
       {children}
+      <LocalDataAutosnapshot />
       <SupabaseAutosave />
     </>
   );

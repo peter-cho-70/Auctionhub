@@ -60,9 +60,29 @@ function tradeType(value: unknown): NearbyMarketTradeType {
     : "기타";
 }
 
+function parseListingAreas(item: Record<string, unknown>): {
+  buildingAreaSqm: number | null;
+  landAreaSqm: number | null;
+  areaSqm: number | null;
+} {
+  const building = positiveNum(
+    item.buildingAreaSqm ?? item.building_area_sqm,
+  );
+  const land = positiveNum(item.landAreaSqm ?? item.land_area_sqm);
+  const legacy = positiveNum(item.areaSqm ?? item.area_sqm);
+  const buildingAreaSqm = building ?? (land == null ? legacy : null);
+  const landAreaSqm = land;
+  return {
+    buildingAreaSqm,
+    landAreaSqm,
+    areaSqm: buildingAreaSqm ?? legacy,
+  };
+}
+
 function normalizeListing(raw: unknown, index: number): NearbyMarketListing | null {
   const item = asRecord(raw);
   if (!item) return null;
+  const areas = parseListingAreas(item);
   return {
     id: text(item.id) || text(item.article_no) || `market-${index + 1}`,
     source: source(item.source),
@@ -72,7 +92,9 @@ function normalizeListing(raw: unknown, index: number): NearbyMarketListing | nu
     dong: text(item.dong),
     address: text(item.address),
     title: text(item.title),
-    areaSqm: positiveNum(item.areaSqm ?? item.area_sqm),
+    areaSqm: areas.areaSqm,
+    buildingAreaSqm: areas.buildingAreaSqm,
+    landAreaSqm: areas.landAreaSqm,
     floor: text(item.floor ?? item.floor_info),
     buildYear: positiveNum(item.buildYear ?? item.build_year),
     dealAmountManwon: positiveNum(item.dealAmountManwon ?? item.deal_amount),
@@ -143,6 +165,7 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
   if (naver) {
     for (const [roomType, value] of Object.entries(naver)) {
       for (const row of arrayRecords(value)) {
+        const areas = parseListingAreas({ areaSqm: row.area_sqm });
         listings.push({
           id: `naver-${listings.length + 1}`,
           source: "naver",
@@ -152,7 +175,9 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
           dong: "",
           address: text(row.address),
           title: text(row.title),
-          areaSqm: positiveNum(row.area_sqm),
+          areaSqm: areas.areaSqm,
+          buildingAreaSqm: areas.buildingAreaSqm,
+          landAreaSqm: areas.landAreaSqm,
           floor: text(row.floor_info),
           buildYear: positiveNum(row.build_year),
           dealAmountManwon: positiveNum(row.deal_amount),
@@ -168,6 +193,11 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
 
   const molit = asRecord(raw.molit);
   for (const row of arrayRecords(molit?.["매매"])) {
+    const areas = parseListingAreas({
+      areaSqm: row.area_sqm,
+      buildingAreaSqm: row.building_area_sqm,
+      landAreaSqm: row.land_area_sqm,
+    });
     listings.push({
       id: `molit-sale-${listings.length + 1}`,
       source: "molit",
@@ -177,7 +207,9 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
       dong: text(row.dong),
       address: text(row.jibun),
       title: "",
-      areaSqm: positiveNum(row.area_sqm),
+      areaSqm: areas.areaSqm,
+      buildingAreaSqm: areas.buildingAreaSqm,
+      landAreaSqm: areas.landAreaSqm,
       floor: text(row.floor),
       buildYear: positiveNum(row.build_year),
       dealAmountManwon: positiveNum(row.deal_amount),
@@ -192,6 +224,7 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
   if (molitRent) {
     for (const [roomType, value] of Object.entries(molitRent)) {
       for (const row of arrayRecords(value)) {
+        const areas = parseListingAreas({ areaSqm: row.area_sqm });
         listings.push({
           id: `molit-rent-${listings.length + 1}`,
           source: "molit",
@@ -201,7 +234,9 @@ function listingsFromLegacyAnalyze(raw: Record<string, unknown>): NearbyMarketLi
           dong: text(row.dong),
           address: text(row.jibun),
           title: "",
-          areaSqm: positiveNum(row.area_sqm),
+          areaSqm: areas.areaSqm,
+          buildingAreaSqm: areas.buildingAreaSqm,
+          landAreaSqm: areas.landAreaSqm,
           floor: text(row.floor),
           buildYear: positiveNum(row.build_year),
           dealAmountManwon: positiveNum(row.deal_amount),
@@ -264,7 +299,9 @@ export function normalizeNearbyMarketAnalysis(
     dong,
     lat: num(source.lat ?? config.lat),
     lng: num(source.lng ?? config.lng),
-    months: positiveNum(source.months ?? config.months),
+    months: positiveNum(source.months ?? config.months ?? source.rentMonths),
+    saleMonths: positiveNum(source.saleMonths ?? source.sale_months) ?? 120,
+    rentMonths: positiveNum(source.rentMonths ?? source.rent_months) ?? 12,
     naverCount:
       positiveNum(source.naverCount ?? source.naver_count ?? summary?.naver_count) ??
       listings.filter((item) => item.source === "naver").length,

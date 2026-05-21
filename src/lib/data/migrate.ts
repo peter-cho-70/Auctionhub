@@ -21,6 +21,13 @@ import {
 } from "@/lib/domain/rent-setting";
 import { normalizeMultiFamilyAnalysis } from "@/lib/domain/multifamily-analysis";
 import { normalizeNearbyMarketAnalysis } from "@/lib/domain/nearby-market";
+import { normalizeRemodelingPriceCatalog } from "@/lib/domain/remodeling-catalog";
+import { normalizeFieldInspection } from "@/lib/domain/field-inspection";
+import { normalizeCaseRemodeling } from "@/lib/domain/remodeling";
+import { normalizeCaseAddressMeta } from "@/lib/address/normalize";
+import { normalizeMarketReferenceNotes } from "@/lib/domain/market-reference-notes";
+import { DEFAULT_FIELD_INTEL_KNOWLEDGE_NOTE } from "@/lib/domain/field-intel";
+import type { KnowledgeNote } from "@/lib/types/domain";
 
 export function parseAppDataJson(text: string): AppData {
   const raw = JSON.parse(text) as unknown;
@@ -97,6 +104,10 @@ export function mergeImportedData(
       : current.processStepOrder,
     cases: mergedCases,
     knowledgeNotes: mergedNotes,
+    guMarketCache: {
+      ...current.guMarketCache,
+      ...incoming.guMarketCache,
+    },
   };
 }
 
@@ -106,9 +117,42 @@ function mergeSameCasePreservingLocalAnalysis(
 ): AuctionCase {
   const nearbyMarketAnalysis =
     currentCase.nearbyMarketAnalysis ?? incomingCase.nearbyMarketAnalysis ?? null;
+  const hasLocalRemodeling =
+    (currentCase.remodeling.unitAssignments?.length ?? 0) > 0 ||
+    (currentCase.remodeling.scenarios?.some(
+      (s) =>
+        s.roomProfiles.some((p) => p.costLines.some((l) => l.selected)) ||
+        s.buildingCostLines.some((l) => l.selected),
+    ) ??
+      false) ||
+    // legacy
+    ((currentCase.remodeling as { units?: unknown[] }).units?.length ?? 0) > 0;
+  const remodeling = hasLocalRemodeling
+    ? currentCase.remodeling
+    : incomingCase.remodeling ?? currentCase.remodeling;
+  const hasLocalFieldInspection =
+    (currentCase.fieldInspection?.nearbyBrokers?.length ?? 0) > 0 ||
+    (currentCase.fieldInspection?.buildingManagement?.companyName?.trim() ?? "")
+      .length > 0 ||
+    (currentCase.fieldInspection?.memo?.trim() ?? "").length > 0;
+  const fieldInspection = hasLocalFieldInspection
+    ? currentCase.fieldInspection
+    : incomingCase.fieldInspection ?? currentCase.fieldInspection;
+  const brokerMarketNotes =
+    currentCase.brokerMarketNotes?.length > 0
+      ? currentCase.brokerMarketNotes
+      : incomingCase.brokerMarketNotes ?? [];
+  const aiMarketNotes =
+    currentCase.aiMarketNotes?.length > 0
+      ? currentCase.aiMarketNotes
+      : incomingCase.aiMarketNotes ?? [];
   return {
     ...currentCase,
     nearbyMarketAnalysis,
+    remodeling,
+    fieldInspection,
+    brokerMarketNotes,
+    aiMarketNotes,
     multiFamilyAnalysis: nearbyMarketAnalysis
       ? {
           ...currentCase.multiFamilyAnalysis,
@@ -124,7 +168,12 @@ function mergeSameCasePreservingLocalAnalysis(
 export function ensureAppData(raw: unknown): AppData {
   if (!raw || typeof raw !== "object") return createDefaultAppData();
   const o = raw as AppData;
-  if (o.schemaVersion !== SCHEMA_VERSION) return createDefaultAppData();
+  if (o.schemaVersion !== SCHEMA_VERSION) {
+    if (Array.isArray(o.cases) && o.cases.length > 0) {
+      return ensureAppData({ ...o, schemaVersion: SCHEMA_VERSION });
+    }
+    return createDefaultAppData();
+  }
   if (!Array.isArray(o.cases)) return createDefaultAppData();
   const lectureGuideByStep =
     o.lectureGuideByStep && typeof o.lectureGuideByStep === "object"
@@ -221,15 +270,85 @@ export function ensureAppData(raw: unknown): AppData {
         cAny.nearbyMarketAnalysis,
         c as unknown as AppData["cases"][number],
       ),
+      brokerMarketNotes: normalizeMarketReferenceNotes(cAny.brokerMarketNotes),
+      aiMarketNotes: normalizeMarketReferenceNotes(cAny.aiMarketNotes),
+      remodeling: normalizeCaseRemodeling(cAny.remodeling),
+      fieldInspection: normalizeFieldInspection(cAny.fieldInspection),
+      addressMeta: normalizeCaseAddressMeta(cAny.addressMeta),
     };
   });
+  const knowledgeNotes = ensureFieldIntelKnowledgeNotes(
+    normalizeKnowledgeNotes(o.knowledgeNotes),
+  );
+  const guMarketCache =
+    o.guMarketCache && typeof o.guMarketCache === "object" && !Array.isArray(o.guMarketCache)
+      ? (o.guMarketCache as AppData["guMarketCache"])
+      : {};
+
   return {
     ...o,
     lectureGuideByStep,
     tenantAnalysisSettings,
     propertyAnalysisSettings,
     cases,
+    knowledgeNotes,
+    guMarketCache,
+    remodelingPriceCatalog: normalizeRemodelingPriceCatalog(
+      (o as unknown as Record<string, unknown>).remodelingPriceCatalog,
+    ),
   };
+}
+
+function normalizeKnowledgeNotes(raw: unknown): KnowledgeNote[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KnowledgeNote[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const n = item as Record<string, unknown>;
+    const title = typeof n.title === "string" ? n.title.trim() : "";
+    if (!title) continue;
+    const id =
+      typeof n.id === "string" && n.id.trim()
+        ? n.id.trim()
+        : `kn-${Date.now()}-${out.length}`;
+    const createdAt =
+      typeof n.createdAt === "string" ? n.createdAt : new Date().toISOString();
+    out.push({
+      id,
+      category: typeof n.category === "string" ? n.category : "general",
+      title,
+      body: typeof n.body === "string" ? n.body : "",
+      linkedCaseId:
+        typeof n.linkedCaseId === "string" && n.linkedCaseId.trim()
+          ? n.linkedCaseId.trim()
+          : null,
+      fieldIntelGuideId:
+        typeof n.fieldIntelGuideId === "string" && n.fieldIntelGuideId.trim()
+          ? n.fieldIntelGuideId.trim()
+          : null,
+      createdAt,
+      updatedAt:
+        typeof n.updatedAt === "string" ? n.updatedAt : createdAt,
+    });
+  }
+  return out;
+}
+
+function ensureFieldIntelKnowledgeNotes(notes: KnowledgeNote[]): KnowledgeNote[] {
+  if (notes.some((note) => note.fieldIntelGuideId === "daejeon-health")) {
+    return notes;
+  }
+  const t = new Date().toISOString();
+  const seeded: KnowledgeNote = {
+    ...DEFAULT_FIELD_INTEL_KNOWLEDGE_NOTE,
+    id:
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `kn-field-intel-${Date.now()}`,
+    createdAt: t,
+    updatedAt: t,
+  };
+  return [seeded, ...notes];
 }
 
 function normalizePropertyAnalysisSettings(raw: unknown) {

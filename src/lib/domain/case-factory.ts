@@ -11,6 +11,8 @@ import { parseAuctionUrl } from "@/lib/domain/url-parser";
 import { estimateNextMinPrice } from "@/lib/domain/finance";
 import { emptyRentSetting } from "@/lib/domain/rent-setting";
 import { emptyMultiFamilyAnalysis } from "@/lib/domain/multifamily-analysis";
+import { emptyFieldInspection } from "@/lib/domain/field-inspection";
+import { emptyCaseRemodeling } from "@/lib/domain/remodeling";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -23,6 +25,7 @@ export interface NewCaseInput {
   sourceUrl: string;
   caseNumber?: string;
   address?: string;
+  addressMeta?: AuctionCase["addressMeta"];
   propertyType?: string;
   builtYear?: string;
   floor?: string;
@@ -60,6 +63,7 @@ export function createAuctionCase(
     sourceUrl: parsed.normalizedUrl || input.sourceUrl.trim(),
     caseNumber: input.caseNumber?.trim() || parsed.caseNumber,
     address: input.address?.trim() || parsed.address,
+    addressMeta: input.addressMeta ?? null,
     propertyType: input.propertyType?.trim() || "",
     builtYear: input.builtYear?.trim() ?? "",
     floor: input.floor?.trim() ?? "",
@@ -100,11 +104,15 @@ export function createAuctionCase(
     priorityLevel: 1,
     priority: input.priority ?? "normal",
     fieldSurvey: input.fieldSurvey?.trim() ?? "",
+    fieldInspection: emptyFieldInspection(),
     memo: input.memo ?? "",
     sourceDocuments: input.sourceDocuments ?? [],
     rentSetting: emptyRentSetting(),
     multiFamilyAnalysis: emptyMultiFamilyAnalysis(),
     nearbyMarketAnalysis: null,
+    brokerMarketNotes: [],
+    aiMarketNotes: [],
+    remodeling: emptyCaseRemodeling(),
     checklists: buildCaseChecklistsFromTemplates(data),
     decision: { ...EMPTY_DECISION },
   };

@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   AppData,
   AuctionCase,
+  GuMarketCacheEntry,
   BidRound,
   CaseChecklist,
   CaseDecision,
@@ -14,7 +15,9 @@ import type {
   KnowledgeNote,
   MessageTemplate,
   PropertyAnalysisSettings,
+  RemodelingPriceCatalog,
 } from "@/lib/types/domain";
+import { normalizeRemodelingPriceCatalog } from "@/lib/domain/remodeling-catalog";
 import { STORAGE_KEY } from "@/lib/data/storage";
 import { createDefaultAppData } from "@/lib/data/default-data";
 import { createAuctionCase } from "@/lib/domain/case-factory";
@@ -108,10 +111,13 @@ type AppStore = {
   clearLectureGuideForStep: (step: CaseStatus) => void;
   setNoDividendRequestGuide: (text: string) => void;
   setPropertyAnalysisSettings: (patch: Partial<PropertyAnalysisSettings>) => void;
+  setRemodelingPriceCatalog: (catalog: RemodelingPriceCatalog) => void;
 
   addKnowledgeNote: (note: Omit<KnowledgeNote, "id" | "createdAt" | "updatedAt">) => void;
   updateKnowledgeNote: (id: string, patch: Partial<KnowledgeNote>) => void;
   removeKnowledgeNote: (id: string) => void;
+
+  setGuMarketCache: (entry: GuMarketCacheEntry) => void;
 };
 
 function updateCaseById(
@@ -393,6 +399,14 @@ export const useAppStore = create<AppStore>()(
           },
         })),
 
+      setRemodelingPriceCatalog: (catalog) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            remodelingPriceCatalog: normalizeRemodelingPriceCatalog(catalog),
+          },
+        })),
+
       addKnowledgeNote: (note) =>
         set((s) => {
           const id =
@@ -431,6 +445,17 @@ export const useAppStore = create<AppStore>()(
           data: {
             ...s.data,
             knowledgeNotes: s.data.knowledgeNotes.filter((n) => n.id !== id),
+          },
+        })),
+
+      setGuMarketCache: (entry) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            guMarketCache: {
+              ...s.data.guMarketCache,
+              [entry.lawdCode]: entry,
+            },
           },
         })),
     }),

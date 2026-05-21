@@ -16,6 +16,7 @@ import {
   listLocalDataSnapshots,
   saveLocalDataSnapshot,
 } from "@/lib/data/client-backup";
+import { FIELD_INTEL_GUIDES } from "@/lib/domain/field-intel";
 import { useAppStore } from "@/store/app-store";
 
 function snapshotCasePreview(json: string) {
@@ -45,6 +46,7 @@ export function DataPageClient({
   const resetToDefaults = useAppStore((s) => s.resetToDefaults);
   const addKnowledgeNote = useAppStore((s) => s.addKnowledgeNote);
   const notes = useAppStore((s) => s.data.knowledgeNotes);
+  const cases = useAppStore((s) => s.data.cases);
   const removeKnowledgeNote = useAppStore((s) => s.removeKnowledgeNote);
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -189,6 +191,17 @@ export function DataPageClient({
     setMsg("스냅샷 파일을 내려받았습니다.");
   };
 
+  const saveSnapshotNow = () => {
+    const json = exportDataJson();
+    if (appDataCaseCount(json) === 0) {
+      setMsg("저장할 물건이 없습니다.");
+      return;
+    }
+    saveLocalDataSnapshot(json, "manual-snapshot");
+    refreshSnapshots();
+    setMsg("로컬 스냅샷을 저장했습니다. (최대 2개 유지)");
+  };
+
   const restoreSnapshot = (snapshot: (typeof snapshots)[number]) => {
     if (!confirm(`스냅샷(${snapshot.caseCount}개 물건)으로 현재 데이터를 교체할까요?`)) {
       return;
@@ -328,13 +341,25 @@ export function DataPageClient({
         </p>
       )}
 
-      {snapshots.length > 0 && (
-        <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
-          <h2 className="font-medium">로컬 자동 스냅샷</h2>
-          <p className="mt-1 text-xs opacity-90">
-            클라우드 병합, JSON 가져오기, 초기화 직전의 최근 상태를 1개만
-            보관합니다.
-          </p>
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="font-medium">로컬 자동 스냅샷</h2>
+            <p className="mt-1 text-xs opacity-90">
+              클라우드 병합, JSON 가져오기, 초기화·편집 후 등 최근 상태를
+              최대 2개만 보관합니다. 용량이 부족하면 기존 스냅샷을 지우지 않고
+              새 항목만 건너뜁니다. 편집 후 약 90초 뒤 자동 저장됩니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={saveSnapshotNow}
+            className="shrink-0 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-medium text-white dark:bg-emerald-200 dark:text-emerald-950"
+          >
+            지금 스냅샷 저장
+          </button>
+        </div>
+        {snapshots.length > 0 ? (
           <div className="mt-3 space-y-2">
             {snapshots.map((snapshot) => (
               <div
@@ -390,8 +415,12 @@ export function DataPageClient({
               </div>
             ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="mt-3 text-xs opacity-80">
+            저장된 스냅샷이 없습니다. 위 버튼으로 지금 상태를 백업할 수 있습니다.
+          </p>
+        )}
+      </section>
 
       <section className="flex flex-wrap gap-2">
         <button
@@ -436,7 +465,14 @@ export function DataPageClient({
       </section>
 
       <section className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
-        <h2 className="font-medium">지식 노트 (간단)</h2>
+        <h2 className="font-medium">지식 노트</h2>
+        <p className="mt-1 text-xs text-neutral-500">
+          탐문·시장정보는{" "}
+          <Link href="/field-intel" className="underline underline-offset-2">
+            탐문 가이드
+          </Link>
+          와 연결할 수 있습니다.
+        </p>
         <form
           className="mt-3 grid gap-2 sm:grid-cols-2"
           onSubmit={(e) => {
@@ -445,12 +481,17 @@ export function DataPageClient({
             const title = String(fd.get("title") ?? "").trim();
             const body = String(fd.get("body") ?? "").trim();
             const category = String(fd.get("category") ?? "general").trim();
+            const linkedCaseId = String(fd.get("linkedCaseId") ?? "").trim();
+            const fieldIntelGuideId = String(
+              fd.get("fieldIntelGuideId") ?? "",
+            ).trim();
             if (!title) return;
             addKnowledgeNote({
               category: category || "general",
               title,
               body,
-              linkedCaseId: null,
+              linkedCaseId: linkedCaseId || null,
+              fieldIntelGuideId: fieldIntelGuideId || null,
             });
             e.currentTarget.reset();
             setMsg("노트를 추가했습니다.");
@@ -458,7 +499,7 @@ export function DataPageClient({
         >
           <input
             name="category"
-            placeholder="카테고리 (권리분석/명도/…)"
+            placeholder="카테고리 (탐문/대전, 권리분석…)"
             className="rounded border px-2 py-1 text-sm dark:bg-neutral-900"
           />
           <input
@@ -467,6 +508,31 @@ export function DataPageClient({
             placeholder="제목"
             className="rounded border px-2 py-1 text-sm dark:bg-neutral-900"
           />
+          <select
+            name="fieldIntelGuideId"
+            className="rounded border px-2 py-1 text-sm dark:bg-neutral-900"
+            defaultValue=""
+          >
+            <option value="">탐문 가이드 (없음)</option>
+            {FIELD_INTEL_GUIDES.map((guide) => (
+              <option key={guide.id} value={guide.id}>
+                {guide.title}
+              </option>
+            ))}
+          </select>
+          <select
+            name="linkedCaseId"
+            className="rounded border px-2 py-1 text-sm dark:bg-neutral-900"
+            defaultValue=""
+          >
+            <option value="">연결 물건 (없음)</option>
+            {cases.map((item) => (
+              <option key={item.id} value={item.id}>
+                {[item.caseNumber, item.address].filter(Boolean).join(" · ") ||
+                  item.id}
+              </option>
+            ))}
+          </select>
           <textarea
             name="body"
             rows={3}
@@ -488,7 +554,27 @@ export function DataPageClient({
             >
               <div>
                 <div className="font-medium">{n.title}</div>
-                <div className="text-xs text-neutral-500">{n.category}</div>
+                <div className="text-xs text-neutral-500">{n.category}
+                  {n.fieldIntelGuideId ? (
+                    <>
+                      {" · "}
+                      <Link
+                        href={`/field-intel?guide=${n.fieldIntelGuideId}`}
+                        className="underline"
+                      >
+                        탐문
+                      </Link>
+                    </>
+                  ) : null}
+                  {n.linkedCaseId ? (
+                    <>
+                      {" · "}
+                      <Link href={`/cases/${n.linkedCaseId}`} className="underline">
+                        물건
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
                 {n.body && (
                   <p className="mt-1 whitespace-pre-wrap text-neutral-700 dark:text-neutral-300">
                     {n.body}

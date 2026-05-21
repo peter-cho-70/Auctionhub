@@ -8,8 +8,10 @@ import { parseAuctionUrl } from "@/lib/domain/url-parser";
 import { formatWonDigits, parseWonInput } from "@/lib/format/won";
 import {
   emptyRoomShapeMix,
+  type CaseAddressMeta,
   ROOM_SHAPE_OPTIONS,
 } from "@/lib/types/domain";
+import { AddressSearchField } from "@/components/address-search-field";
 import {
   filterAreaSqmInputRaw,
   parseAreaSqmInputToNumber,
@@ -22,6 +24,7 @@ export default function NewCasePage() {
   const [url, setUrl] = useState("");
   const [caseNumber, setCaseNumber] = useState("");
   const [address, setAddress] = useState("");
+  const [addressMeta, setAddressMeta] = useState<CaseAddressMeta | null>(null);
   const [propertyType, setPropertyType] = useState("");
   const [builtYear, setBuiltYear] = useState("");
   const [floor, setFloor] = useState("");
@@ -66,6 +69,7 @@ export default function NewCasePage() {
       sourceUrl: url.trim(),
       caseNumber: caseNumber || undefined,
       address: address || undefined,
+      addressMeta: addressMeta ?? undefined,
       propertyType: propertyType || undefined,
       builtYear: builtYear || undefined,
       floor: floor || undefined,
@@ -130,11 +134,15 @@ export default function NewCasePage() {
           </div>
           <div className="sm:col-span-2">
             <label className="text-sm font-medium">주소</label>
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
+            <div className="mt-1">
+              <AddressSearchField
+                address={address}
+                addressMeta={addressMeta}
+                inputClassName="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                onAddressChange={setAddress}
+                onAddressMetaChange={setAddressMeta}
+              />
+            </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-4 sm:col-span-2">
             <div>

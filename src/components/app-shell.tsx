@@ -27,6 +27,8 @@ const menuGroups = [
     links: [
       { href: "/process", label: "프로세스" },
       { href: "/study", label: "공부하기" },
+      { href: "/remodeling", label: "리모델링" },
+      { href: "/field-intel", label: "탐문·시장" },
       { href: "/lectures", label: "강의 원본" },
     ],
   },

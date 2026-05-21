@@ -1,7 +1,7 @@
 "use client";
 
 import mammoth from "mammoth";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LECTURE_ORIGINAL_DOCS } from "@/lib/data/lecture-sources";
 import { STATUS_LABELS } from "@/lib/domain/status-labels";
 
@@ -10,6 +10,7 @@ export function LectureOriginalsView() {
   const [html, setHtml] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const previewTopRef = useRef<HTMLDivElement>(null);
 
   const selected = LECTURE_ORIGINAL_DOCS.find(
     (d) => d.fileName === selectedFile,
@@ -23,6 +24,23 @@ export function LectureOriginalsView() {
     }
     return [...groups.entries()];
   }, []);
+
+  const scrollPreviewToTop = useCallback(() => {
+    previewTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedFile) return;
+    scrollPreviewToTop();
+  }, [selectedFile, scrollPreviewToTop]);
+
+  useEffect(() => {
+    if (!html || !selectedFile) return;
+    scrollPreviewToTop();
+  }, [html, selectedFile, scrollPreviewToTop]);
 
   const loadDoc = useCallback(async (fileName: string, href: string) => {
     setLoading(true);
@@ -46,10 +64,11 @@ export function LectureOriginalsView() {
   const selectFile = useCallback(
     (fileName: string) => {
       setSelectedFile(fileName);
+      scrollPreviewToTop();
       const doc = LECTURE_ORIGINAL_DOCS.find((d) => d.fileName === fileName);
       if (doc) void loadDoc(doc.fileName, doc.href);
     },
-    [loadDoc],
+    [loadDoc, scrollPreviewToTop],
   );
 
   return (
@@ -119,7 +138,7 @@ export function LectureOriginalsView() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1" ref={previewTopRef}>
         {!selectedFile && (
           <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50/80 p-8 text-center text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900/50 dark:text-neutral-400">
             오른쪽 목록에서 자료를 선택하면 여기에 내용이 표시됩니다.
@@ -135,7 +154,7 @@ export function LectureOriginalsView() {
               <p className="mt-0.5 text-xs text-neutral-500">{selected?.description}</p>
             </div>
 
-            <div className="max-h-[min(85vh,1200px)] overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+            <div className="px-4 py-4 sm:px-6 sm:py-6">
               {loading && (
                 <p className="text-sm text-neutral-500">불러오는 중…</p>
               )}
