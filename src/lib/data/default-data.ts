@@ -532,6 +532,8 @@ export function createDefaultAppData(): AppData {
     propertyAnalysisSettings: { ...DEFAULT_PROPERTY_ANALYSIS_SETTINGS },
     messageTemplates: structuredClone(DEFAULT_MESSAGE_TEMPLATES),
     knowledgeNotes: [],
+    sharedExternalAiQa: [],
+    sharedAuctionSaleComparables: [],
     cases: [],
     guMarketCache: {},
     remodelingPriceCatalog: structuredClone(DEFAULT_REMODELING_PRICE_CATALOG),

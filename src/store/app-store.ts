@@ -1,7 +1,11 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
+import {
+  debouncedSafePersistToLocalStorage,
+  safePersistToLocalStorage,
+} from "@/lib/data/compact-storage";
 import type {
   AppData,
   AuctionCase,
@@ -12,6 +16,8 @@ import type {
   CaseStatus,
   ChecklistItemInstance,
   ChecklistTemplateItem,
+  AuctionSaleComparable,
+  ExternalAiQaEntry,
   KnowledgeNote,
   MessageTemplate,
   PropertyAnalysisSettings,
@@ -28,6 +34,10 @@ import {
   mergeImportedData,
   parseAppDataJson,
 } from "@/lib/data/migrate";
+import {
+  emptyAuctionBidAnalysis,
+  MAX_AUCTION_SALE_COMPARABLES,
+} from "@/lib/domain/auction-bid-analysis";
 
 function nowIso() {
   return new Date().toISOString();
@@ -53,6 +63,12 @@ type AppStore = {
   data: AppData;
   _hasHydrated: boolean;
   setHasHydrated: (v: boolean) => void;
+
+  /** 입찰가 분석 PDF 업로드 UI (persist 제외 — 리마운트 후에도 메시지 유지) */
+  bidPdfImportLog: string;
+  bidPdfImportBusy: boolean;
+  bidPdfImportWarnings: string[];
+  setBidPdfImportLog: (message: string) => void;
 
   importData: (json: string, mode: "replace" | "merge") => void;
   exportDataJson: () => string;
@@ -117,8 +133,40 @@ type AppStore = {
   updateKnowledgeNote: (id: string, patch: Partial<KnowledgeNote>) => void;
   removeKnowledgeNote: (id: string) => void;
 
+  setSharedExternalAiQa: (entries: ExternalAiQaEntry[]) => void;
+
+  setSharedAuctionSaleComparables: (entries: AuctionSaleComparable[]) => void;
+
+  /** 입찰가 분석 — 매각 사례 추가 (저장 후 총 건수, 실패 시 -1) */
+  appendAuctionSaleComparables: (
+    caseId: string,
+    items: AuctionSaleComparable[],
+  ) => number;
+
   setGuMarketCache: (entry: GuMarketCacheEntry) => void;
 };
+
+function createQuotaSafeLocalStorage(): StateStorage {
+  return {
+    getItem: (name) => {
+      try {
+        return localStorage.getItem(name);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (name, value) => {
+      debouncedSafePersistToLocalStorage(name, value);
+    },
+    removeItem: (name) => {
+      try {
+        localStorage.removeItem(name);
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
 
 function updateCaseById(
   data: AppData,
@@ -137,6 +185,11 @@ export const useAppStore = create<AppStore>()(
       data: createDefaultAppData(),
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
+
+      bidPdfImportLog: "",
+      bidPdfImportBusy: false,
+      bidPdfImportWarnings: [],
+      setBidPdfImportLog: (message) => set({ bidPdfImportLog: message }),
 
       importData: (json, mode) => {
         const incoming = parseAppDataJson(json);
@@ -448,6 +501,50 @@ export const useAppStore = create<AppStore>()(
           },
         })),
 
+      setSharedExternalAiQa: (entries) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            sharedExternalAiQa: entries,
+          },
+        })),
+
+      setSharedAuctionSaleComparables: (entries) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            sharedAuctionSaleComparables: entries,
+          },
+        })),
+
+      appendAuctionSaleComparables: (caseId, items) => {
+        if (items.length === 0) return -1;
+        const exists = get().data.cases.some((c) => c.id === caseId);
+        if (!exists) return -1;
+
+        let total = 0;
+        set((s) => {
+          const data = updateCaseById(s.data, caseId, (c) => {
+            const current = Array.isArray(c.auctionSaleComparables)
+              ? c.auctionSaleComparables
+              : [];
+            const next = [...current, ...items].slice(
+              0,
+              MAX_AUCTION_SALE_COMPARABLES,
+            );
+            total = next.length;
+            return touchCase({
+              ...c,
+              auctionSaleComparables: next,
+              auctionBidAnalysis:
+                c.auctionBidAnalysis ?? emptyAuctionBidAnalysis(),
+            });
+          });
+          return { data };
+        });
+        return total;
+      },
+
       setGuMarketCache: (entry) =>
         set((s) => ({
           data: {
@@ -461,7 +558,7 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: STORAGE_KEY,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => createQuotaSafeLocalStorage()),
       partialize: (s) => ({ data: s.data }),
       merge: (persisted, current) => ({
         ...current,

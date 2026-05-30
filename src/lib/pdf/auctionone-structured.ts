@@ -3,6 +3,7 @@ import type {
   CaseSourceDocumentKind,
 } from "@/lib/types/domain";
 import type { AuctionPdfExtract } from "@/lib/pdf/auction-pdf-parser";
+import { buildSpeedAuctionStructuredJson } from "@/lib/pdf/speed-auction-structured";
 
 export const AUCTIONONE_PDF_PARSER_VERSION = "auctionone-pdf-v1";
 
@@ -48,6 +49,17 @@ function newId(): string {
     return crypto.randomUUID();
   }
   return `srcdoc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export function buildPdfStructuredJson(args: {
+  extracted: AuctionPdfExtract;
+  rawText: string;
+  meta: PdfImportMeta;
+}) {
+  if (args.extracted.format === "speedauction") {
+    return buildSpeedAuctionStructuredJson(args);
+  }
+  return buildAuctionOneStructuredJson(args);
 }
 
 export function buildAuctionOneStructuredJson(args: {
@@ -124,7 +136,7 @@ export function buildStructuredJsonForDocument(args: {
 }) {
   const { kind, extracted, rawText, meta } = args;
   if (kind === "auctionone-pdf") {
-    return buildAuctionOneStructuredJson({ extracted, rawText, meta });
+    return buildPdfStructuredJson({ extracted, rawText, meta });
   }
 
   const commonMeta = {

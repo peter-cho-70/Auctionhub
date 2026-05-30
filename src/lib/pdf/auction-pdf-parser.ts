@@ -1,4 +1,38 @@
+import {
+  detectAuctionPdfFormat,
+  parseSpeedAuctionPdfText,
+} from "@/lib/pdf/speed-auction-pdf-parser";
+
+export type AuctionPdfFormat = "speedauction" | "auctionone";
+
+export type SpeedAuctionBidSchedule = {
+  round: string | null;
+  date: string | null;
+  minimumPrice: number | null;
+  result: string | null;
+  isCurrent?: boolean;
+};
+
+export type SpeedAuctionFloor = {
+  floor: string;
+  structure: string | null;
+  useType: string | null;
+  areaSqm: number | null;
+  appraisalPrice: number | null;
+};
+
+export type SpeedAuctionNearbyStat = {
+  period: string;
+  saleCount: number;
+  avgAppraisal: number | null;
+  avgSalePrice: number | null;
+  saleRatePct: number | null;
+  failCountAvg: number | null;
+  estimatedPrice: number | null;
+};
+
 export type AuctionPdfExtract = {
+  format: AuctionPdfFormat;
   caseNumber: string | null;
   address: string | null;
   propertyType: string | null;
@@ -9,7 +43,46 @@ export type AuctionPdfExtract = {
   buildingAreaSqm: number | null;
   parkingUnitCount: number | null;
   builtYear: string | null;
+  winningBidPrice: number | null;
+  bidRatePct: number | null;
+  soldRound: number | null;
   notes: string;
+  /** 스피드옥션 확장 */
+  addressJibun?: string | null;
+  addressRoad?: string | null;
+  zipCode?: string | null;
+  court?: string | null;
+  auctionType?: string | null;
+  auctionDivision?: string | null;
+  contactPhone?: string | null;
+  minPriceRatePct?: number | null;
+  depositAmount?: number | null;
+  depositRatePct?: number | null;
+  claimAmount?: number | null;
+  owner?: string | null;
+  debtor?: string | null;
+  creditor?: string | null;
+  saleTarget?: string | null;
+  landAppraisal?: number | null;
+  buildingAppraisal?: number | null;
+  builtYearSource?: string | null;
+  appraisalDate?: string | null;
+  appraisalCompany?: string | null;
+  caseReceivedDate?: string | null;
+  auctionStartDate?: string | null;
+  dividendDeadline?: string | null;
+  currentRound?: number | null;
+  auctionStatus?: "ongoing" | "sold" | null;
+  zoning?: string | null;
+  landCategory?: string | null;
+  officialLandPricePerSqm?: number | null;
+  officialLandPriceDate?: string | null;
+  tenantDepositTotal?: number | null;
+  tenantMonthlyRentTotal?: number | null;
+  householdCountHint?: number | null;
+  bidSchedules?: SpeedAuctionBidSchedule[];
+  buildingFloors?: SpeedAuctionFloor[];
+  nearbyStats?: SpeedAuctionNearbyStat[];
 };
 
 function clean(s: string): string {
@@ -40,7 +113,7 @@ function parseIsoDateFromDotFormat(raw: string | null | undefined): string | nul
   return `${y}-${mm}-${dd}`;
 }
 
-export function parseAuctionPdfText(text: string): AuctionPdfExtract {
+function parseAuctionOnePdfText(text: string): AuctionPdfExtract {
   const t = text ?? "";
 
   const caseNumber =
@@ -103,6 +176,41 @@ export function parseAuctionPdfText(text: string): AuctionPdfExtract {
     return yearOnly ?? clean(m);
   })();
 
+  const winningSale = (() => {
+    const m =
+      t.match(/매각\s*:\s*([\d,]+)\s*원\s*\(([\d.]+)\s*%\)/) ??
+      t.match(/매각가\s*([\d,]+)\s*원\s*\(([\d.]+)\s*%\)/);
+    if (!m) return { price: null as number | null, rate: null as number | null };
+    const rate = parseFloat(m[2]!.replace(/,/g, ""));
+    return {
+      price: parseKrwAmount(m[1]),
+      rate: Number.isFinite(rate) ? rate : null,
+    };
+  })();
+
+  const soldRound = (() => {
+    if (winningSale.price == null) return null;
+    const inline = t.match(
+      /(\d)\s*차\s+\d{4}-\d{2}-\d{2}\s+[\d,]+\s*원[\s\S]{0,48}?매각\s*:/,
+    );
+    if (inline) {
+      const n = parseInt(inline[1]!, 10);
+      return Number.isFinite(n) ? n : null;
+    }
+    const failCount = (t.match(/유찰/g) ?? []).length;
+    if (failCount > 0) return failCount + 1;
+    const roundHint = t.match(/(\d)\s*차\s+\d{4}-\d{2}-\d{2}/g);
+    return roundHint?.length ?? 1;
+  })();
+
+  const builtYearFromBuilding = (() => {
+    const m = t.match(/사용승인일\s+(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+    if (m) {
+      return `${m[1]!}-${String(m[2]!).padStart(2, "0")}-${String(m[3]!).padStart(2, "0")}`;
+    }
+    return null;
+  })();
+
   const notes = (() => {
     const lines = t
       .split("\n")
@@ -123,6 +231,7 @@ export function parseAuctionPdfText(text: string): AuctionPdfExtract {
   })();
 
   return {
+    format: "auctionone",
     caseNumber,
     address,
     propertyType,
@@ -132,8 +241,19 @@ export function parseAuctionPdfText(text: string): AuctionPdfExtract {
     landAreaSqm,
     buildingAreaSqm,
     parkingUnitCount,
-    builtYear,
+    builtYear: builtYearFromBuilding ?? builtYear ?? null,
+    winningBidPrice: winningSale.price,
+    bidRatePct: winningSale.rate,
+    soldRound,
     notes,
+    auctionStatus: winningSale.price != null ? "sold" : "ongoing",
   };
 }
 
+export function parseAuctionPdfText(text: string): AuctionPdfExtract {
+  const format = detectAuctionPdfFormat(text);
+  if (format === "speedauction") {
+    return parseSpeedAuctionPdfText(text);
+  }
+  return parseAuctionOnePdfText(text);
+}

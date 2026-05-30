@@ -5,6 +5,10 @@ import {
   appDataCaseCount,
   saveLocalDataSnapshot,
 } from "@/lib/data/client-backup";
+import {
+  compactAppDataForStorage,
+  getStorageQuotaMessage,
+} from "@/lib/data/compact-storage";
 import { useAppStore } from "@/store/app-store";
 
 /** 편집 후 일정 시간 지나면 로컬 스냅샷(최대 2개)에 자동 반영 */
@@ -24,8 +28,11 @@ export function LocalDataAutosnapshot() {
 
   useEffect(() => {
     if (!hasHydrated) return;
+    if (getStorageQuotaMessage()) return;
 
-    const json = JSON.stringify(data);
+    const json = JSON.stringify(
+      compactAppDataForStorage(data, { stripExtractedText: true }),
+    );
     if (json === lastSavedRef.current) return;
     if (appDataCaseCount(json) === 0) return;
 

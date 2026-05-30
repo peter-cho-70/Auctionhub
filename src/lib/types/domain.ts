@@ -95,6 +95,99 @@ export interface KnowledgeNote {
   updatedAt: string;
 }
 
+/** 외부 AI(ChatGPT 등) 질문·답 카테고리 */
+export type ExternalAiQaCategory =
+  | "market"
+  | "bid"
+  | "rent_trend"
+  | "tenant"
+  | "other";
+
+export interface ExternalAiQaEntry {
+  id: string;
+  category: ExternalAiQaCategory;
+  question: string;
+  answer: string;
+  createdAt: string;
+  updatedAt: string;
+  originCaseId?: string | null;
+}
+
+export type AuctionSaleSellerType =
+  | "private"
+  | "lh"
+  | "sh"
+  | "trust"
+  | "unknown";
+
+/** 인근 경매 매각 비교 사례 */
+export interface AuctionSaleComparable {
+  id: string;
+  caseNumber: string;
+  address: string;
+  dong: string;
+  lat: number | null;
+  lng: number | null;
+  useApprovalDate: string | null;
+  landAreaSqm: number | null;
+  buildingAreaSqm: number | null;
+  roomShapeSummary: string;
+  parkingCount: number | null;
+  isMultifamily: boolean;
+  hasNeighborhoodCommercial: boolean;
+  appraisalPrice: number | null;
+  winningBidPrice: number | null;
+  bidRatePct: number | null;
+  soldRound: number | null;
+  sellerType: AuctionSaleSellerType;
+  bidDate: string | null;
+  memo: string;
+  sourceUrl: string;
+  /** 진행 중 경매 (매각완료 아님) */
+  isOngoing: boolean;
+  /** 입찰 참가자 수 */
+  bidderCount: number | null;
+  /** 유찰 회차 (진행 중·비교용) */
+  failedRoundCount: number | null;
+  /** PDF 등록 시 추출 원문 (로컬 미리보기, 용량 제한) */
+  sourceExtractedText?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CompareAnchorSource = "address" | "map_pick" | "market";
+
+export interface AuctionCompareAnchor {
+  lat: number | null;
+  lng: number | null;
+  radiusM: number;
+  source: CompareAnchorSource;
+}
+
+export interface AuctionBidAnalysisResult {
+  peerCount: number;
+  auctionMedianBidRatePct: number | null;
+  auctionAdjustedBidRatePct: number | null;
+  marketSaleWon: number | null;
+  marketImpliedBidRatePct: number | null;
+  landFloorWon: number | null;
+  landFloorBidRatePct: number | null;
+  suggestedBidWon: number | null;
+  suggestedBidRatePct: number | null;
+  rangeLowWon: number | null;
+  rangeHighWon: number | null;
+  narrative: string;
+  computedAt: string;
+}
+
+export interface AuctionBidAnalysis {
+  anchor: AuctionCompareAnchor;
+  useApprovalDate: string | null;
+  ageAdjustPctPerYear: number;
+  wizardStep: 1 | 2 | 3 | 4 | 5;
+  lastResult: AuctionBidAnalysisResult | null;
+}
+
 export interface TenantAnalysisSettings {
   noDividendRequestGuide: string;
 }
@@ -328,12 +421,48 @@ export interface CaseRemodeling {
   activeScenarioTier: RemodelingScenarioTier;
   scenarios: RemodelingScenarioPlan[];
   unitAssignments: UnitRemodelingAssignment[];
+  /** 이상형 다가구 인테리어 레퍼런스 (사진·공법·연결 비용) */
+  idealReference: RemodelingIdealReference;
   memo: string;
   updatedAt: string;
   /** @deprecated 마이그레이션용 */
   units?: UnitRemodeling[];
   /** @deprecated 마이그레이션용 */
   buildingCostLines?: RemodelingCostLine[];
+}
+
+/** 이상형 인테리어 사진 구역 */
+export type RemodelingReferenceZone =
+  | "overview"
+  | "entrance"
+  | "living"
+  | "bathroom"
+  | "bedroom"
+  | "other";
+
+export interface RemodelingReferencePhoto {
+  id: string;
+  zone: RemodelingReferenceZone;
+  caption: string;
+  /** 해당 구역 공사 방법·시공 포인트 */
+  constructionMethod: string;
+  /** 카탈로그 공종 키 (비용 연동) */
+  linkedCatalogKeys: string[];
+  /** 사진별 추가 예상 비용 (만원, 수동 보정) */
+  estimatedCostManwon: number | null;
+  /** IndexedDB 이미지 키 (= id) */
+  imageRef: string;
+  mimeType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RemodelingIdealReference {
+  title: string;
+  summary: string;
+  /** 건물 공통 공법·자재 기준 */
+  globalConstructionNotes: string;
+  photos: RemodelingReferencePhoto[];
 }
 
 /** 호실별 임대 (엑셀 하단 표와 유사) */
@@ -592,6 +721,124 @@ export interface CaseAddressMeta {
   resolvedAt: string | null;
 }
 
+/** 입찰 전(전반) / 낙찰 후(후반) / 종료 */
+export type CasePhase = "pre_auction" | "post_auction" | "closed";
+
+export interface CaseAnalysisReportSnapshot {
+  generatedAt: string;
+  /** IndexedDB 키 — html이 비어 있으면 여기서 로드 */
+  htmlRef: string | null;
+  html: string;
+  templateVersion: string;
+}
+
+export interface PreAuctionWorkflow {
+  /** 보고서 표지·파일명용 별칭 (예: 나경빌라) */
+  reportNickname: string;
+  /** 기수·코호트 (예: 2026-1기) */
+  reportCohort: string;
+  /** 분석보고서 템플릿 버전 (예: Ver0530) */
+  reportTemplateVersion: string;
+  /** §1 선정 이유 */
+  reportSelectionReason: string;
+  /** §6 위치·교통·편의 */
+  reportLocationNotes: string;
+  /** §7 임장·건물 사진 메모 */
+  reportFieldPhotoNotes: string;
+  /** §10 경매 조회수·관심도 (자유 메모) */
+  reportAuctionInterest: string;
+  /** §10 조회수 — 전체 */
+  viewCountTotal: number | null;
+  /** §10 유효 조회 */
+  viewCountValid: number | null;
+  /** §10 온비드 등 */
+  viewCountOnbid: number | null;
+  /** §12 대출·LTV·신탁 요약 */
+  reportLoanSummary: string;
+  /** §14 입찰 당일 여유분 */
+  reportBidDayBuffer: string;
+  lastReport: CaseAnalysisReportSnapshot | null;
+  /** 입찰 분석 보고서 확정 여부 */
+  reportFinalized: boolean;
+}
+
+export interface PostAuctionLoanPackage {
+  preApprovalNotes: string;
+  executionNotes: string;
+  memo: string;
+}
+
+export interface PostAuctionEvictionPackage {
+  tenantSummary: string;
+  planNotes: string;
+  memo: string;
+}
+
+export interface PostAuctionLeasingPackage {
+  targetRentNotes: string;
+  marketingNotes: string;
+  memo: string;
+}
+
+export interface PostAuctionRemodelingPackage {
+  scopeNotes: string;
+  budgetNotes: string;
+  memo: string;
+}
+
+/** 임장·보고서용 사진 구역 */
+export type FieldPhotoZone =
+  | "exterior"
+  | "interior"
+  | "floor"
+  | "roof"
+  | "unit"
+  | "structure"
+  | "surroundings";
+
+export interface FieldPhotoRecord {
+  id: string;
+  zone: FieldPhotoZone;
+  caption: string;
+  imageRef: string;
+  mimeType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CaseFieldPhotoGallery {
+  photos: FieldPhotoRecord[];
+}
+
+export type TenantDividendStatus = "full" | "partial" | "none" | "unknown";
+
+/** §8 임차인 구조화 기록 (PDF·탐문 병합) */
+export interface CaseTenantRecord {
+  id: string;
+  unit: string;
+  occupantName: string;
+  deposit: number | null;
+  monthlyRent: number | null;
+  moveInDate: string;
+  confirmedDate: string;
+  dividendRequestDate: string;
+  hasOpposingPower: boolean | null;
+  dividendAmount: number | null;
+  undividedAmount: number | null;
+  dividendStatus: TenantDividendStatus;
+  inquiryNotes: string;
+  memo: string;
+  updatedAt: string;
+}
+
+export interface PostAuctionWorkflow {
+  loanPackage: PostAuctionLoanPackage;
+  evictionPackage: PostAuctionEvictionPackage;
+  leasingPackage: PostAuctionLeasingPackage;
+  remodelingEnabled: boolean;
+  remodelingPackage: PostAuctionRemodelingPackage;
+}
+
 export function emptyCaseAddressMeta(): CaseAddressMeta {
   return {
     roadAddress: null,
@@ -660,6 +907,12 @@ export interface AuctionCase {
   nextExpectedMinPrice: number | null;
   wonDayActionsCompleted: boolean;
   status: CaseStatus;
+  /** UI·프로세스 단계 (전반/후반). status와 별도로 수동 전환 가능 */
+  casePhase: CasePhase;
+  /** 입찰 전: 분석 보고서·준비도 */
+  preAuction: PreAuctionWorkflow;
+  /** 낙찰 후: 대출·명도·임대·리모델링 패키지 */
+  postAuction: PostAuctionWorkflow;
   /** 1 신규, 2 정보보강, 3 시스템 권장, 4 사용자 선호, 5 최우선 */
   priorityLevel: PriorityLevel;
   /** @deprecated 5단계 priorityLevel 이전 호환용 */
@@ -668,6 +921,10 @@ export interface AuctionCase {
   fieldSurvey: string;
   /** 임장 현장 연락처·관리업체·주변 부동산 구조화 기록 */
   fieldInspection: FieldInspectionRecord;
+  /** 임장·보고서용 건물·주변 사진 (IndexedDB) */
+  fieldPhotoGallery: CaseFieldPhotoGallery;
+  /** §8 임차인 구조화 표 */
+  tenantRecords: CaseTenantRecord[];
   memo: string;
   /** PDF/JSON 등 등록 당시 원문 자료 */
   sourceDocuments: CaseSourceDocument[];
@@ -681,6 +938,12 @@ export interface AuctionCase {
   brokerMarketNotes: MarketReferenceNote[];
   /** AI·자료 분석 참고 (인근 시세 아래) */
   aiMarketNotes: MarketReferenceNote[];
+  /** 외부 AI 질문·답 (이 물건 전용) */
+  externalAiQa: ExternalAiQaEntry[];
+  /** 인근 경매 매각 비교 (이 물건, 최대 10건) */
+  auctionSaleComparables: AuctionSaleComparable[];
+  /** 입찰가 통합 분석 (경매·실거래·공시지가) */
+  auctionBidAnalysis: AuctionBidAnalysis;
   /** 호실·건물 리모델링 체크리스트·비용 산출 */
   remodeling: CaseRemodeling;
   checklists: CaseChecklist[];
@@ -703,6 +966,8 @@ export interface AppData {
   propertyAnalysisSettings: PropertyAnalysisSettings;
   messageTemplates: MessageTemplate[];
   knowledgeNotes: KnowledgeNote[];
+  sharedExternalAiQa: ExternalAiQaEntry[];
+  sharedAuctionSaleComparables: AuctionSaleComparable[];
   cases: AuctionCase[];
   /** LAWD_CD(5자리) 키 → 구 단위 MOLIT 실거래 캐시 */
   guMarketCache: Record<string, GuMarketCacheEntry>;

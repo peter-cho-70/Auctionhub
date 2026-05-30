@@ -16,6 +16,7 @@ import {
   listLocalDataSnapshots,
   saveLocalDataSnapshot,
 } from "@/lib/data/client-backup";
+import { applyStorageReclaim } from "@/lib/data/compact-storage";
 import { FIELD_INTEL_GUIDES } from "@/lib/domain/field-intel";
 import { useAppStore } from "@/store/app-store";
 
@@ -420,6 +421,38 @@ export function DataPageClient({
             저장된 스냅샷이 없습니다. 위 버튼으로 지금 상태를 백업할 수 있습니다.
           </p>
         )}
+      </section>
+
+      <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm dark:border-amber-900 dark:bg-amber-950/30">
+        <h2 className="font-medium text-amber-950 dark:text-amber-100">
+          저장 공간 정리
+        </h2>
+        <p className="mt-1 text-xs text-amber-900/90 dark:text-amber-200/90">
+          PDF 원문·자동 스냅샷이 쌓이면 「quota exceeded」가 나고 저장·PDF
+          추가가 멈출 수 있습니다. 먼저 JSON보내기로 백업한 뒤 아래를 실행하세요.
+        </p>
+        <button
+          type="button"
+          className="mt-3 rounded-lg border border-amber-400 bg-white px-4 py-2 text-sm font-medium dark:border-amber-800 dark:bg-neutral-950"
+          onClick={() => {
+            if (
+              !confirm(
+                "PDF 원문(출처 문서)을 줄이고 로컬 스냅샷을 비웁니다. JSON 백업은 이미 받으셨나요?",
+              )
+            ) {
+              return;
+            }
+            const result = applyStorageReclaim(useAppStore.getState().data);
+            useAppStore.setState({ data: result.data });
+            setMsg(
+              result.ok
+                ? `${result.message} 새로고침 후 PDF·입찰가 분석을 다시 시도하세요.`
+                : result.message,
+            );
+          }}
+        >
+          PDF 원문·스냅샷 줄이기
+        </button>
       </section>
 
       <section className="flex flex-wrap gap-2">

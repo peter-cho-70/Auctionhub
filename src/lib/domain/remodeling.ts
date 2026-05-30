@@ -15,6 +15,7 @@ import {
   rentUpliftForRoomType,
 } from "@/lib/domain/remodeling-catalog";
 import { DEFAULT_REMODELING_PRICE_CATALOG } from "@/lib/domain/remodeling-catalog-daejeon";
+import { normalizeIdealReference } from "@/lib/domain/remodeling-reference";
 import type {
   AuctionCase,
   CaseRemodeling,
@@ -389,6 +390,7 @@ export function emptyCaseRemodeling(
     activeScenarioTier: "balanced",
     scenarios: SCENARIO_TIERS.map((tier) => createDefaultScenarioPlan(tier, catalog)),
     unitAssignments: [],
+    idealReference: normalizeIdealReference(undefined),
     memo: "",
     updatedAt: new Date().toISOString(),
   };
@@ -548,6 +550,7 @@ function migrateLegacyCaseRemodeling(
     activeScenarioTier,
     scenarios,
     unitAssignments,
+    idealReference: normalizeIdealReference(o.idealReference),
     memo: typeof o.memo === "string" ? o.memo : "",
     updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date().toISOString(),
   };
@@ -584,6 +587,7 @@ export function normalizeCaseRemodeling(
     activeScenarioTier: normalizeScenarioTier(o.activeScenarioTier),
     scenarios,
     unitAssignments,
+    idealReference: normalizeIdealReference(o.idealReference),
     memo: typeof o.memo === "string" ? o.memo : "",
     updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : base.updatedAt,
   };

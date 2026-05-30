@@ -47,6 +47,14 @@ import {
   emptyRoomShapeMix,
   ROOM_SHAPE_OPTIONS,
 } from "@/lib/types/domain";
+import { CaseAiAnalysisPanel } from "@/components/case-ai-analysis-panel";
+import { CaseAuctionBidAnalysisPanel } from "@/components/case-auction-bid-analysis-panel";
+import { CaseAnalysisReportPanel } from "@/components/case-analysis-report-panel";
+import { CaseTenantRecordsPanel } from "@/components/case-tenant-records-panel";
+import { FieldPhotoGalleryPanel } from "@/components/field-photo-gallery-panel";
+import { CaseDetailViewToggle } from "@/components/case-detail-view-toggle";
+import { CasePhaseWorkflowNav } from "@/components/case-phase-workflow-nav";
+import { CasePostAuctionPanel } from "@/components/case-post-auction-panel";
 import { CaseRentSettingPanel } from "@/components/case-rent-setting-panel";
 import {
   CaseFieldInspectionPanel,
@@ -85,11 +93,22 @@ import {
   LAST_SELECTED_CASE_KEY,
 } from "@/lib/constants/storage";
 import { saveLocalDataSnapshot } from "@/lib/data/client-backup";
+import {
+  inferCasePhaseFromStatus,
+  type PostAuctionPackageId,
+  type PreAuctionBlockId,
+} from "@/lib/domain/case-workflow";
+import { CLASSIC_CASE_DETAIL_UI_V1 } from "@/lib/ui/case-detail-ui-versions";
+import { readCaseDetailViewMode } from "@/lib/ui/case-detail-view-mode";
+import type { CaseDetailViewMode } from "@/lib/ui/case-detail-ui-versions";
+import type { CasePhase } from "@/lib/types/domain";
 import { useAppStore } from "@/store/app-store";
 
 type Tab =
   | "basic"
   | "multi_family"
+  | "bid_analysis"
+  | "ai_analysis"
   | "market_analysis"
   | "tenant_analysis"
   | "remodeling"
@@ -100,12 +119,16 @@ type Tab =
   | "decision"
   | "templates"
   | "tools"
-  | "rent";
+  | "rent"
+  | "analysis_report"
+  | "post_workflow";
 
 const TAB_KEYS: Tab[] = [
   "source_docs",
   "basic",
   "multi_family",
+  "bid_analysis",
+  "ai_analysis",
   "market_analysis",
   "tenant_analysis",
   "rent",
@@ -116,6 +139,8 @@ const TAB_KEYS: Tab[] = [
   "decision",
   "templates",
   "tools",
+  "analysis_report",
+  "post_workflow",
 ];
 
 const MONEY_EXTRA_KEYS = ["낙찰가", "보증금", "내입찰가"] as const;
@@ -427,6 +452,14 @@ export default function CaseDetailPage() {
     return isTab(saved) ? saved : "basic";
   });
 
+  const [detailViewMode, setDetailViewMode] = useState<CaseDetailViewMode>(() =>
+    typeof window === "undefined" ? "phase" : readCaseDetailViewMode(),
+  );
+  const [phaseUiBlock, setPhaseUiBlock] = useState<PreAuctionBlockId | null>(null);
+  const [phaseUiPackage, setPhaseUiPackage] = useState<PostAuctionPackageId | null>(
+    null,
+  );
+
   const [basicDraft, setBasicDraft] = useState<Partial<AuctionCase> | null>(
     null,
   );
@@ -503,8 +536,38 @@ export default function CaseDetailPage() {
       ...merged,
       landAreaSqm: landParsed ?? merged.landAreaSqm ?? null,
       buildingAreaSqm: buildingParsed ?? merged.buildingAreaSqm ?? null,
+      // 기본 탭 draft는 예전 스냅샷이라, 다른 탭 데이터는 항상 스토어(c) 기준
+      auctionSaleComparables: c.auctionSaleComparables,
+      auctionBidAnalysis: c.auctionBidAnalysis,
+      externalAiQa: c.externalAiQa,
+      nearbyMarketAnalysis: c.nearbyMarketAnalysis,
+      sourceDocuments: c.sourceDocuments,
+      multiFamilyAnalysis: c.multiFamilyAnalysis,
+      remodeling: c.remodeling,
+      fieldInspection: c.fieldInspection,
+      rentSetting: c.rentSetting,
+      brokerMarketNotes: c.brokerMarketNotes,
+      aiMarketNotes: c.aiMarketNotes,
     };
   }, [c, basicDraft, landSqmInput, buildingSqmInput]);
+
+  const updateCaseExternalAiQa = useCallback(
+    (patch: Pick<AuctionCase, "externalAiQa">) => {
+      updateCase(id, patch);
+    },
+    [id, updateCase],
+  );
+
+  const updateCaseBidAnalysis = useCallback(
+    (
+      patch: Partial<
+        Pick<AuctionCase, "auctionSaleComparables" | "auctionBidAnalysis">
+      >,
+    ) => {
+      updateCase(id, patch);
+    },
+    [id, updateCase],
+  );
 
   if (!c) {
     return (
@@ -714,25 +777,25 @@ export default function CaseDetailPage() {
     ) {
       return;
     }
+    router.replace("/cases");
     deleteCase(id);
-    router.push("/cases");
   };
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "source_docs", label: "원문/PDF" },
-    { key: "basic", label: "기본·수동입력" },
-    { key: "multi_family", label: "다가구 분석" },
-    { key: "market_analysis", label: "주변 시세 분석" },
-    { key: "tenant_analysis", label: "세입자 분석" },
-    { key: "rent", label: "임대세팅" },
-    { key: "remodeling", label: "리모델링" },
-    { key: "field_inspection", label: "임장 확인" },
-    { key: "checklists", label: "체크리스트" },
-    { key: "rounds", label: "입찰·유찰 회차" },
-    { key: "decision", label: "판단 기록" },
-    { key: "templates", label: "문자·템플릿" },
-    { key: "tools", label: "도구" },
-  ];
+  const tabs: { key: Tab; label: string }[] = CLASSIC_CASE_DETAIL_UI_V1.tabs.map(
+    (t) => ({ key: t.key as Tab, label: t.label }),
+  );
+
+  const workflowPhase: CasePhase =
+    c.casePhase === "closed" ? "closed" : c.casePhase;
+  const phaseNavPhase: CasePhase =
+    workflowPhase === "closed" ? inferCasePhaseFromStatus(c.status) : workflowPhase;
+
+  const saveWorkflowPatch = useCallback(
+    (patch: Parameters<typeof updateCase>[1]) => {
+      updateCase(id, patch);
+    },
+    [id, updateCase],
+  );
 
   return (
     <div className="space-y-6">
@@ -789,22 +852,38 @@ export default function CaseDetailPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-neutral-200 pb-2 dark:border-neutral-800">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={`rounded-md px-2.5 py-1.5 text-sm ${
-              tab === t.key
-                ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <CaseDetailViewToggle value={detailViewMode} onChange={setDetailViewMode} />
+
+      {detailViewMode === "phase" ? (
+        <CasePhaseWorkflowNav
+          caseData={c}
+          phase={phaseNavPhase}
+          onPhaseChange={(p) => saveWorkflowPatch({ casePhase: p })}
+          activeTab={tab}
+          onSelectTab={setTab}
+          activeBlockId={phaseUiBlock}
+          activePackageId={phaseUiPackage}
+          onSelectBlock={setPhaseUiBlock}
+          onSelectPackage={setPhaseUiPackage}
+        />
+      ) : (
+        <div className="flex flex-wrap gap-1 border-b border-neutral-200 pb-2 dark:border-neutral-800">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`rounded-md px-2.5 py-1.5 text-sm ${
+                tab === t.key
+                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                  : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === "basic" && (
         <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
@@ -1738,6 +1817,42 @@ export default function CaseDetailPage() {
         />
       )}
 
+      {tab === "bid_analysis" && (
+        <CaseAuctionBidAnalysisPanel
+          key={id}
+          caseId={id}
+          caseData={c}
+          onUpdateCase={updateCaseBidAnalysis}
+        />
+      )}
+
+      {tab === "analysis_report" && (
+        <CaseAnalysisReportPanel
+          key={`${id}-${c.updatedAt}`}
+          caseId={id}
+          caseData={c}
+          onSave={(patch) => saveWorkflowPatch(patch)}
+          onJumpToTab={(t) => setTab(t as Tab)}
+        />
+      )}
+
+      {tab === "post_workflow" && (
+        <CasePostAuctionPanel
+          key={`${id}-${c.updatedAt}`}
+          caseData={c}
+          activePackageId={phaseUiPackage}
+          onSave={(patch) => saveWorkflowPatch(patch)}
+        />
+      )}
+
+      {tab === "ai_analysis" && (
+        <CaseAiAnalysisPanel
+          key={id}
+          caseData={viewCase}
+          onUpdateCase={updateCaseExternalAiQa}
+        />
+      )}
+
       {tab === "market_analysis" && (
         <NearbyMarketAnalysisPanel
           caseData={viewCase}
@@ -1756,16 +1871,25 @@ export default function CaseDetailPage() {
       )}
 
       {tab === "tenant_analysis" && (
-        <TenantAnalysisPanel
-          documents={c.sourceDocuments}
-          onDocumentsChange={updateSourceDocumentsFromAnalysis}
-          noDividendRequestGuide={noDividendRequestGuide}
-          onNoDividendRequestGuideChange={setNoDividendRequestGuide}
-          fallbackAddress={c.address}
-          fallbackMinimumPrice={c.minPrice}
-          fallbackExpectedBidPrice={c.expectedBidPrice}
-          fallbackAppraisalPrice={c.appraisalPrice}
-        />
+        <div className="space-y-4">
+          <CaseTenantRecordsPanel
+            caseData={c}
+            onChange={(tenantRecords) => {
+              updateCase(id, { tenantRecords });
+              syncDraftFromCase();
+            }}
+          />
+          <TenantAnalysisPanel
+            documents={c.sourceDocuments}
+            onDocumentsChange={updateSourceDocumentsFromAnalysis}
+            noDividendRequestGuide={noDividendRequestGuide}
+            onNoDividendRequestGuideChange={setNoDividendRequestGuide}
+            fallbackAddress={c.address}
+            fallbackMinimumPrice={c.minPrice}
+            fallbackExpectedBidPrice={c.expectedBidPrice}
+            fallbackAppraisalPrice={c.appraisalPrice}
+          />
+        </div>
       )}
 
       {tab === "remodeling" && (
@@ -1780,22 +1904,32 @@ export default function CaseDetailPage() {
       )}
 
       {tab === "field_inspection" && (
-        <CaseFieldInspectionPanel
-          key={id}
-          caseData={viewCase}
-          onSave={saveMultiFamilyAnalysis}
-          onUpdateCase={(patch) => {
-            updateCase(id, patch);
-            syncDraftFromCase();
-          }}
-          onAppendFieldSurvey={(text) => {
-            const base = (c.fieldSurvey ?? "").trim();
-            updateCase(id, {
-              fieldSurvey: base ? `${base}\n\n${text}` : text,
-            });
-            syncDraftFromCase();
-          }}
-        />
+        <div className="space-y-4">
+          <FieldPhotoGalleryPanel
+            caseId={id}
+            gallery={c.fieldPhotoGallery}
+            onChange={(fieldPhotoGallery) => {
+              updateCase(id, { fieldPhotoGallery });
+              syncDraftFromCase();
+            }}
+          />
+          <CaseFieldInspectionPanel
+            key={id}
+            caseData={viewCase}
+            onSave={saveMultiFamilyAnalysis}
+            onUpdateCase={(patch) => {
+              updateCase(id, patch);
+              syncDraftFromCase();
+            }}
+            onAppendFieldSurvey={(text) => {
+              const base = (c.fieldSurvey ?? "").trim();
+              updateCase(id, {
+                fieldSurvey: base ? `${base}\n\n${text}` : text,
+              });
+              syncDraftFromCase();
+            }}
+          />
+        </div>
       )}
 
       {tab === "checklists" && (

@@ -8,6 +8,13 @@ import {
 import { LocalDataAutosnapshot } from "@/components/local-data-autosnapshot";
 import { SupabaseAutosave } from "@/components/supabase-autosave";
 import { saveLocalDataSnapshot } from "@/lib/data/client-backup";
+import {
+  compactAppDataForStorage,
+  flushDebouncedPersist,
+  getStorageQuotaMessage,
+  persistAppDataNow,
+  reclaimBrowserStorageOnStartup,
+} from "@/lib/data/compact-storage";
 import { loadBundledSeedIfEmpty } from "@/lib/data/seed-bootstrap";
 import { createClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -22,7 +29,19 @@ export function AppStoreProvider({
 
   useEffect(() => {
     void (async () => {
+      reclaimBrowserStorageOnStartup();
       await useAppStore.persist.rehydrate();
+      const afterHydrate = useAppStore.getState().data;
+      const compacted = compactAppDataForStorage(afterHydrate, {
+        stripExtractedText: true,
+        maxGuCacheKeys: 5,
+      });
+      const beforeBytes = JSON.stringify(afterHydrate).length;
+      const afterBytes = JSON.stringify(compacted).length;
+      if (afterBytes < beforeBytes) {
+        useAppStore.setState({ data: compacted });
+        persistAppDataNow(compacted);
+      }
       useAppStore.setState({ _hasHydrated: true });
 
       if (isSupabaseConfigured()) {
@@ -38,7 +57,12 @@ export function AppStoreProvider({
               console.warn("[Supabase]", remote.error);
             } else if (remote.json) {
               const store = useAppStore.getState();
-              saveLocalDataSnapshot(store.exportDataJson(), "before-cloud-startup-merge");
+              if (!getStorageQuotaMessage()) {
+                saveLocalDataSnapshot(
+                  store.exportDataJson(),
+                  "before-cloud-startup-merge",
+                );
+              }
               store.importData(remote.json, "merge");
             } else {
               const { error: upErr } = await saveAppStateAction(
@@ -58,6 +82,10 @@ export function AppStoreProvider({
 
       setReady(true);
     })();
+
+    const onPageHide = () => flushDebouncedPersist();
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
 
   if (!ready) {

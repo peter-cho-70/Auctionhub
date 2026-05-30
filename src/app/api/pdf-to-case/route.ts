@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createRequire } from "node:module";
 import { parseAuctionPdfText } from "@/lib/pdf/auction-pdf-parser";
 import { auctionPdfExtractToNewCaseInput } from "@/lib/pdf/pdf-to-newcase";
-import { buildAuctionOneStructuredJson } from "@/lib/pdf/auctionone-structured";
+import { buildPdfStructuredJson } from "@/lib/pdf/auctionone-structured";
 
 export const runtime = "nodejs";
 
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       fileSize: file.size,
       pageCount,
     };
-    const structuredJson = buildAuctionOneStructuredJson({
+    const structuredJson = buildPdfStructuredJson({
       extracted,
       rawText,
       meta,

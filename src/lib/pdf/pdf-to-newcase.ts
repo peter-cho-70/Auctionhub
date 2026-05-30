@@ -37,6 +37,25 @@ function normalizeNonNegativeNumberOrNull(
   return Math.min(max, v);
 }
 
+function buildMemo(extracted: AuctionPdfExtract): string | undefined {
+  const parts: string[] = [];
+  if (extracted.court) parts.push(`법원: ${extracted.court}`);
+  if (extracted.auctionType) parts.push(`구분: ${extracted.auctionType}`);
+  if (extracted.creditor) parts.push(`채권자: ${extracted.creditor}`);
+  if (extracted.claimAmount) {
+    parts.push(`청구금액: ${extracted.claimAmount.toLocaleString("ko-KR")}원`);
+  }
+  if (extracted.zoning) parts.push(`용도지역: ${extracted.zoning}`);
+  if (extracted.tenantDepositTotal) {
+    parts.push(
+      `임차보증금합계: ${extracted.tenantDepositTotal.toLocaleString("ko-KR")}원`,
+    );
+  }
+  if (extracted.notes?.trim()) parts.push(extracted.notes.trim());
+  const memo = parts.join("\n").trim();
+  return memo || undefined;
+}
+
 export function auctionPdfExtractToNewCaseInput(args: {
   extracted: AuctionPdfExtract;
   sourceUrl: string;
@@ -48,6 +67,11 @@ export function auctionPdfExtractToNewCaseInput(args: {
   if (!extracted.address) warnings.push("주소를 찾지 못했습니다.");
   if (!extracted.minPrice) warnings.push("최저가를 찾지 못했습니다.");
   if (!extracted.bidDate) warnings.push("매각기일(입찰일)을 찾지 못했습니다.");
+  if (extracted.format === "speedauction" && extracted.auctionStatus === "ongoing") {
+    warnings.push(
+      "진행 중인 경매 PDF입니다. 낙찰가·가율은 없으며 입찰가 분석 비교 사례로는 부적합할 수 있습니다.",
+    );
+  }
 
   const input: NewCaseInput = {
     sourceUrl: sourceUrl.trim(),
@@ -70,7 +94,11 @@ export function auctionPdfExtractToNewCaseInput(args: {
       floor: true,
       max: 99999,
     }),
-    memo: extracted.notes?.trim() ? extracted.notes.trim() : undefined,
+    householdCount: normalizeNonNegativeNumberOrNull(
+      extracted.householdCountHint,
+      { floor: true, max: 9999 },
+    ),
+    memo: buildMemo(extracted),
   };
 
   if (!input.sourceUrl) {
@@ -79,4 +107,3 @@ export function auctionPdfExtractToNewCaseInput(args: {
 
   return { input, warnings };
 }
-

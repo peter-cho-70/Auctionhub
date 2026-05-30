@@ -1,6 +1,9 @@
+import { compactAppDataJsonForStorage } from "@/lib/data/compact-storage";
 import { safeParseAppDataJson } from "@/lib/data/migrate";
 
-const SNAPSHOT_KEY = "auctionflow:v1:snapshots";
+import { SNAPSHOT_STORAGE_KEY } from "@/lib/data/storage";
+
+const SNAPSHOT_KEY = SNAPSHOT_STORAGE_KEY;
 
 /** 로컬 스토리지 용량을 위해 최근 스냅샷만 유지 */
 export const MAX_LOCAL_DATA_SNAPSHOTS = 2;
@@ -71,7 +74,8 @@ export function saveLocalDataSnapshot(json: string, reason: string): void {
   const parsed = safeParseAppDataJson(json);
   if (parsed instanceof Error) return;
 
-  const entry = createSnapshotEntry(json, reason, parsed.cases.length);
+  const compactJson = compactAppDataJsonForStorage(json);
+  const entry = createSnapshotEntry(compactJson, reason, parsed.cases.length);
   const previous = listLocalDataSnapshots();
   const candidates: AppDataSnapshot[] = [entry, ...previous].slice(
     0,

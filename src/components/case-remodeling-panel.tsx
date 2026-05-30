@@ -36,6 +36,7 @@ import {
   mergeAssignmentsFromCase,
   normalizeCaseRemodeling,
 } from "@/lib/domain/remodeling";
+import { RemodelingReferencePanel } from "@/components/remodeling-reference-panel";
 import { formatWonWithUnit } from "@/lib/format/won";
 
 type Props = {
@@ -174,6 +175,15 @@ export function CaseRemodelingPanel({
 
   return (
     <div className="space-y-6">
+      <RemodelingReferencePanel
+        caseId={caseData.id}
+        idealReference={remodeling.idealReference}
+        priceCatalog={priceCatalog}
+        onChange={(idealReference) =>
+          persist({ ...remodeling, idealReference })
+        }
+      />
+
       <section className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4 dark:border-neutral-800 dark:bg-neutral-900/40">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

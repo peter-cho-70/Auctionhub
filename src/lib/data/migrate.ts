@@ -25,9 +25,22 @@ import { normalizeRemodelingPriceCatalog } from "@/lib/domain/remodeling-catalog
 import { normalizeFieldInspection } from "@/lib/domain/field-inspection";
 import { normalizeCaseRemodeling } from "@/lib/domain/remodeling";
 import { normalizeCaseAddressMeta } from "@/lib/address/normalize";
+import { normalizeFieldPhotoGallery } from "@/lib/domain/field-photo-gallery";
+import { normalizeTenantRecords } from "@/lib/domain/case-tenant-records";
 import { normalizeMarketReferenceNotes } from "@/lib/domain/market-reference-notes";
+import { normalizeExternalAiQaList } from "@/lib/domain/external-ai-qa";
+import {
+  normalizeAuctionBidAnalysis,
+  normalizeAuctionSaleComparableList,
+} from "@/lib/domain/auction-bid-analysis";
+import {
+  normalizeCasePhase,
+  normalizePostAuctionWorkflow,
+  normalizePreAuctionWorkflow,
+} from "@/lib/domain/case-workflow";
 import { DEFAULT_FIELD_INTEL_KNOWLEDGE_NOTE } from "@/lib/domain/field-intel";
 import type { KnowledgeNote } from "@/lib/types/domain";
+import { compactAppDataForStorage } from "@/lib/data/compact-storage";
 
 export function parseAppDataJson(text: string): AppData {
   const raw = JSON.parse(text) as unknown;
@@ -78,6 +91,18 @@ export function mergeImportedData(
   for (const n of incoming.knowledgeNotes) {
     if (!noteIds.has(n.id)) mergedNotes.push(n);
   }
+  const sharedIds = new Set(current.sharedExternalAiQa?.map((e) => e.id) ?? []);
+  const mergedShared = [...(current.sharedExternalAiQa ?? [])];
+  for (const e of incoming.sharedExternalAiQa ?? []) {
+    if (!sharedIds.has(e.id)) mergedShared.push(e);
+  }
+  const auctionSharedIds = new Set(
+    current.sharedAuctionSaleComparables?.map((e) => e.id) ?? [],
+  );
+  const mergedAuctionShared = [...(current.sharedAuctionSaleComparables ?? [])];
+  for (const e of incoming.sharedAuctionSaleComparables ?? []) {
+    if (!auctionSharedIds.has(e.id)) mergedAuctionShared.push(e);
+  }
   return {
     ...current,
     messageTemplates: incoming.messageTemplates.length
@@ -104,6 +129,8 @@ export function mergeImportedData(
       : current.processStepOrder,
     cases: mergedCases,
     knowledgeNotes: mergedNotes,
+    sharedExternalAiQa: mergedShared,
+    sharedAuctionSaleComparables: mergedAuctionShared,
     guMarketCache: {
       ...current.guMarketCache,
       ...incoming.guMarketCache,
@@ -146,6 +173,19 @@ function mergeSameCasePreservingLocalAnalysis(
     currentCase.aiMarketNotes?.length > 0
       ? currentCase.aiMarketNotes
       : incomingCase.aiMarketNotes ?? [];
+  const externalAiQa =
+    currentCase.externalAiQa?.length > 0
+      ? currentCase.externalAiQa
+      : incomingCase.externalAiQa ?? [];
+  const auctionSaleComparables =
+    currentCase.auctionSaleComparables?.length > 0
+      ? currentCase.auctionSaleComparables
+      : incomingCase.auctionSaleComparables ?? [];
+  const auctionBidAnalysis =
+    currentCase.auctionBidAnalysis?.lastResult != null ||
+    (currentCase.auctionSaleComparables?.length ?? 0) > 0
+      ? currentCase.auctionBidAnalysis
+      : incomingCase.auctionBidAnalysis ?? currentCase.auctionBidAnalysis;
   return {
     ...currentCase,
     nearbyMarketAnalysis,
@@ -153,6 +193,9 @@ function mergeSameCasePreservingLocalAnalysis(
     fieldInspection,
     brokerMarketNotes,
     aiMarketNotes,
+    externalAiQa,
+    auctionSaleComparables,
+    auctionBidAnalysis,
     multiFamilyAnalysis: nearbyMarketAnalysis
       ? {
           ...currentCase.multiFamilyAnalysis,
@@ -229,6 +272,10 @@ export function ensureAppData(raw: unknown): AppData {
         ? cAny.hasBuildingViolation
         : false;
     const priorityLevel = normalizePriorityLevel(cAny.priorityLevel, cAny.priority);
+    const status =
+      typeof cAny.status === "string"
+        ? (cAny.status as AppData["cases"][number]["status"])
+        : "watching";
 
     return {
       ...c,
@@ -272,9 +319,19 @@ export function ensureAppData(raw: unknown): AppData {
       ),
       brokerMarketNotes: normalizeMarketReferenceNotes(cAny.brokerMarketNotes),
       aiMarketNotes: normalizeMarketReferenceNotes(cAny.aiMarketNotes),
+      externalAiQa: normalizeExternalAiQaList(cAny.externalAiQa),
+      auctionSaleComparables: normalizeAuctionSaleComparableList(
+        cAny.auctionSaleComparables,
+      ),
+      auctionBidAnalysis: normalizeAuctionBidAnalysis(cAny.auctionBidAnalysis),
       remodeling: normalizeCaseRemodeling(cAny.remodeling),
       fieldInspection: normalizeFieldInspection(cAny.fieldInspection),
+      fieldPhotoGallery: normalizeFieldPhotoGallery(cAny.fieldPhotoGallery),
+      tenantRecords: normalizeTenantRecords(cAny.tenantRecords),
       addressMeta: normalizeCaseAddressMeta(cAny.addressMeta),
+      casePhase: normalizeCasePhase(cAny.casePhase, status),
+      preAuction: normalizePreAuctionWorkflow(cAny.preAuction),
+      postAuction: normalizePostAuctionWorkflow(cAny.postAuction),
     };
   });
   const knowledgeNotes = ensureFieldIntelKnowledgeNotes(
@@ -285,18 +342,25 @@ export function ensureAppData(raw: unknown): AppData {
       ? (o.guMarketCache as AppData["guMarketCache"])
       : {};
 
-  return {
+  const oAny = o as unknown as Record<string, unknown>;
+
+  const base: AppData = {
     ...o,
     lectureGuideByStep,
     tenantAnalysisSettings,
     propertyAnalysisSettings,
     cases,
     knowledgeNotes,
+    sharedExternalAiQa: normalizeExternalAiQaList(oAny.sharedExternalAiQa),
+    sharedAuctionSaleComparables: normalizeAuctionSaleComparableList(
+      oAny.sharedAuctionSaleComparables,
+    ),
     guMarketCache,
     remodelingPriceCatalog: normalizeRemodelingPriceCatalog(
       (o as unknown as Record<string, unknown>).remodelingPriceCatalog,
     ),
   };
+  return compactAppDataForStorage(base);
 }
 
 function normalizeKnowledgeNotes(raw: unknown): KnowledgeNote[] {

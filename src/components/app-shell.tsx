@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { StorageQuotaBanner } from "@/components/storage-quota-banner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LAST_SELECTED_CASE_KEY } from "@/lib/constants/storage";
 import { useAppStore } from "@/store/app-store";
@@ -144,6 +145,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      <StorageQuotaBanner />
       <main className="mx-auto w-full max-w-6xl flex-1 bg-[var(--background)] px-4 py-6">
         {children}
       </main>

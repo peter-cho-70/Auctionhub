@@ -12,7 +12,17 @@ import { estimateNextMinPrice } from "@/lib/domain/finance";
 import { emptyRentSetting } from "@/lib/domain/rent-setting";
 import { emptyMultiFamilyAnalysis } from "@/lib/domain/multifamily-analysis";
 import { emptyFieldInspection } from "@/lib/domain/field-inspection";
+import { emptyFieldPhotoGallery, normalizeFieldPhotoGallery } from "@/lib/domain/field-photo-gallery";
+import { normalizeTenantRecords } from "@/lib/domain/case-tenant-records";
 import { emptyCaseRemodeling } from "@/lib/domain/remodeling";
+import {
+  emptyAuctionBidAnalysis,
+} from "@/lib/domain/auction-bid-analysis";
+import {
+  emptyPostAuctionWorkflow,
+  emptyPreAuctionWorkflow,
+  inferCasePhaseFromStatus,
+} from "@/lib/domain/case-workflow";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -101,10 +111,15 @@ export function createAuctionCase(
       minPrice != null ? estimateNextMinPrice(minPrice) : null,
     wonDayActionsCompleted: false,
     status: input.initialStatus ?? "watching",
+    casePhase: inferCasePhaseFromStatus(input.initialStatus ?? "watching"),
+    preAuction: emptyPreAuctionWorkflow(),
+    postAuction: emptyPostAuctionWorkflow(),
     priorityLevel: 1,
     priority: input.priority ?? "normal",
     fieldSurvey: input.fieldSurvey?.trim() ?? "",
     fieldInspection: emptyFieldInspection(),
+    fieldPhotoGallery: emptyFieldPhotoGallery(),
+    tenantRecords: [],
     memo: input.memo ?? "",
     sourceDocuments: input.sourceDocuments ?? [],
     rentSetting: emptyRentSetting(),
@@ -112,6 +127,9 @@ export function createAuctionCase(
     nearbyMarketAnalysis: null,
     brokerMarketNotes: [],
     aiMarketNotes: [],
+    externalAiQa: [],
+    auctionSaleComparables: [],
+    auctionBidAnalysis: emptyAuctionBidAnalysis(),
     remodeling: emptyCaseRemodeling(),
     checklists: buildCaseChecklistsFromTemplates(data),
     decision: { ...EMPTY_DECISION },
