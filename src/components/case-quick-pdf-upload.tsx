@@ -6,7 +6,7 @@ import type { CaseSourceDocument, CaseSourceDocumentKind } from "@/lib/types/dom
 
 type PdfToJsonOk = {
   ok: true;
-  meta: unknown;
+  meta: any;
   rawText: string;
   structuredJson: unknown;
   extracted?: { caseNumber?: string | null };
