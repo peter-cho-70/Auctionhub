@@ -1,10 +1,13 @@
 import type {
   AuctionPdfExtract,
   AuctionPdfFormat,
+  SpeedAuctionAncillaryStructure,
   SpeedAuctionBidSchedule,
   SpeedAuctionFloor,
   SpeedAuctionNearbyStat,
 } from "@/lib/pdf/auction-pdf-parser";
+import { enrichAuctionExtractMetrics } from "@/lib/pdf/auction-text-metrics";
+import { sumHouseholdFromText } from "@/lib/pdf/floor-unit-inference";
 
 function clean(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -108,6 +111,86 @@ function parseSpeedAuctionBidSchedules(text: string): SpeedAuctionBidSchedule[] 
   return schedules;
 }
 
+function parseAppraisalBreakdown(text: string): {
+  land: number | null;
+  building: number | null;
+  ancillary: number | null;
+  total: number | null;
+} {
+  const block = text.match(
+    /감정평가현황[\s\S]*?합계\s*\n[^\n]+/,
+  )?.[0];
+  if (!block) {
+    return { land: null, building: null, ancillary: null, total: null };
+  }
+  const line = block.split("\n").pop() ?? "";
+  if (/^[Χ\s\t]+$/.test(line.replace(/원/g, ""))) {
+    return { land: null, building: null, ancillary: null, total: null };
+  }
+  const amounts = [...line.matchAll(/([\d,]+)\s*원/g)].map((m) =>
+    parseKrwAmount(m[1]),
+  );
+  if (amounts.length >= 4) {
+    return {
+      land: amounts[0] ?? null,
+      building: amounts[1] ?? null,
+      ancillary: amounts[2] ?? null,
+      total: amounts[amounts.length - 1] ?? null,
+    };
+  }
+  if (amounts.length === 3) {
+    return {
+      land: amounts[0] ?? null,
+      building: amounts[1] ?? null,
+      ancillary: null,
+      total: amounts[2] ?? null,
+    };
+  }
+  if (amounts.length === 2) {
+    return {
+      land: amounts[0] ?? null,
+      building: amounts[1] ?? null,
+      ancillary: null,
+      total: null,
+    };
+  }
+  if (amounts.length === 1) {
+    return {
+      land: null,
+      building: null,
+      ancillary: null,
+      total: amounts[0] ?? null,
+    };
+  }
+  return { land: null, building: null, ancillary: null, total: null };
+}
+
+function parseAncillaryStructures(
+  text: string,
+): SpeedAuctionAncillaryStructure[] {
+  const block = text.match(
+    /제시외건물현황[\s\S]*?(?=임차인현황|건물소멸기준|건물\s*등기\s*사항|$)/,
+  )?.[0];
+  if (!block) return [];
+
+  const rows: SpeedAuctionAncillaryStructure[] = [];
+  for (const m of block.matchAll(
+    /(\d+)\s+([^\n\t]+?)\s+([^\t\n]+?)\s+([^\t\n]+?)\s+([\d.]+)㎡[\s\S]*?(매각포함|매각제외)/g,
+  )) {
+    rows.push({
+      seq: parseInt(m[1]!, 10) || null,
+      jibun: clean(m[2]!),
+      floor: clean(m[3]!),
+      structure: null,
+      useType: clean(m[4]!),
+      areaSqm: parseNumber(m[5]),
+      appraisalPrice: null,
+      includedInSale: m[6] === "매각포함",
+    });
+  }
+  return rows;
+}
+
 function parseSpeedAuctionFloors(text: string): SpeedAuctionFloor[] {
   const floors: SpeedAuctionFloor[] = [];
   const re =
@@ -161,6 +244,7 @@ function buildSpeedAuctionNotes(text: string, extra: string[]): string {
 }
 
 function countHouseholdHint(text: string): number | null {
+  const fromFloors = sumHouseholdFromText(text);
   const m = text.match(
     /다중주택\s*\((\d+)개호[^)]*\)[^)]*다중주택\s*\((\d+)개호[^)]*\)[^)]*다중주택\s*\((\d+)개호/,
   );
@@ -170,7 +254,11 @@ function countHouseholdHint(text: string): number | null {
     );
   }
   const units = new Set([...text.matchAll(/(\d{3})호/g)].map((x) => x[1]));
-  return units.size > 0 ? units.size : null;
+  const fromUnits = units.size > 0 ? units.size : null;
+  if (fromFloors != null && fromUnits != null) {
+    return Math.max(fromFloors, fromUnits);
+  }
+  return fromFloors ?? fromUnits;
 }
 
 export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
@@ -233,16 +321,23 @@ export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
     t.match(/건물면적\s+([\d.]+)\s*㎡/)?.[1],
   );
 
-  const landAppraisal = parseKrwAmount(
-    t.match(
-      /감정평가현황[\s\S]*?토지\s+건물[\s\S]*?\n([\d,]+)원\s+([\d,]+)원/,
-    )?.[1],
-  );
-  const buildingAppraisal = parseKrwAmount(
-    t.match(
-      /감정평가현황[\s\S]*?토지\s+건물[\s\S]*?\n([\d,]+)원\s+([\d,]+)원/,
-    )?.[2],
-  );
+  const appraisalBreakdown = parseAppraisalBreakdown(t);
+  const landAppraisal =
+    appraisalBreakdown.land ??
+    parseKrwAmount(
+      t.match(
+        /감정평가현황[\s\S]*?토지\s+건물[\s\S]*?\n([\d,]+)원\s+([\d,]+)원/,
+      )?.[1],
+    );
+  const buildingAppraisal =
+    appraisalBreakdown.building ??
+    parseKrwAmount(
+      t.match(
+        /감정평가현황[\s\S]*?토지\s+건물[\s\S]*?\n([\d,]+)원\s+([\d,]+)원/,
+      )?.[2],
+    );
+  const ancillaryAppraisal = appraisalBreakdown.ancillary;
+  const appraisalFromBreakdown = appraisalBreakdown.total;
 
   const builtYear =
     parseIsoDateFlexible(
@@ -317,15 +412,29 @@ export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
   );
 
   const buildingFloors = parseSpeedAuctionFloors(t);
+  const ancillaryStructures = parseAncillaryStructures(t);
   const nearbyStats = parseNearbyStats(t);
-  const householdCountHint = countHouseholdHint(t);
+  const sourceUrl =
+    t.match(/https:\/\/www\.speedauction\.co\.kr[^\s)]+/)?.[0] ?? null;
+  const tenantRowCount = [...t.matchAll(/보증금\s*:\s*[\d,]+\s*원/g)].length;
+  const metrics = enrichAuctionExtractMetrics({
+    rawText: t,
+    buildingFloors,
+    tenantRowCount,
+  });
+  const householdCountHint = Math.max(
+    metrics.householdCountHint ?? 0,
+    countHouseholdHint(t) ?? 0,
+  ) || null;
 
-  const parkingUnitCount = (() => {
-    const m =
-      t.match(/총주차대수\s*(\d+)\s*대/)?.[1] ??
-      t.match(/주차\s*대수\s*(\d+)\s*대/)?.[1];
-    return m ? parseNumber(m) : null;
-  })();
+  const parkingUnitCount =
+    metrics.parkingUnitCount ??
+    (() => {
+      const m =
+        t.match(/총주차대수\s*(\d+)\s*대/)?.[1] ??
+        t.match(/주차\s*대수\s*(\d+)\s*대/)?.[1];
+      return m ? parseNumber(m) : null;
+    })();
 
   const notes = buildSpeedAuctionNotes(
     t,
@@ -351,7 +460,7 @@ export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
     auctionDivision,
     contactPhone,
     propertyType,
-    appraisalPrice,
+    appraisalPrice: appraisalPrice ?? appraisalFromBreakdown,
     minPrice,
     minPriceRatePct,
     depositAmount,
@@ -366,6 +475,8 @@ export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
     buildingAreaSqm,
     landAppraisal,
     buildingAppraisal,
+    ancillaryAppraisal,
+    sourceUrl,
     parkingUnitCount,
     builtYear,
     builtYearSource,
@@ -386,8 +497,13 @@ export function parseSpeedAuctionPdfText(text: string): AuctionPdfExtract {
     tenantDepositTotal,
     tenantMonthlyRentTotal,
     householdCountHint,
+    buildingCoverageRatioPct: metrics.buildingCoverageRatioPct,
+    floorAreaRatioPct: metrics.floorAreaRatioPct,
+    residentialUnitHint: metrics.residentialUnitHint,
+    commercialUnitHint: metrics.commercialUnitHint,
     bidSchedules,
     buildingFloors,
+    ancillaryStructures,
     nearbyStats,
     notes,
   };

@@ -9,12 +9,23 @@ import {
   filterAreaSqmInputRaw,
   parseAreaSqmInputToNumber,
 } from "@/lib/format/area-input";
-import { buildPdfSourceDocument } from "@/lib/pdf/auctionone-structured";
+import { listTitleFromStructuredJson } from "@/lib/domain/case-document-facts";
+import { registerSourcePdfUpload } from "@/lib/pdf/register-source-pdf-upload";
+import type { CaseSourceDocumentKind } from "@/lib/types/domain";
+
+const AUCTION_PDF_KIND_OPTIONS: {
+  value: CaseSourceDocumentKind;
+  label: string;
+}[] = [
+  { value: "daejangauction-pdf", label: "대장옥션 경매 PDF (기본)" },
+  { value: "speedauction-pdf", label: "스피드옥션 경매 PDF" },
+];
 
 type ApiOk = {
   ok: true;
+  kind?: CaseSourceDocumentKind;
   meta: { fileName: string; fileSize: number; pageCount: number | null };
-  extracted: unknown;
+  extracted: { caseNumber?: string | null; sourceUrl?: string | null };
   newCaseInput: {
     sourceUrl: string;
     caseNumber?: string;
@@ -28,6 +39,7 @@ type ApiOk = {
     buildingAreaSqm?: number | null;
     parkingUnitCount?: number | null;
     memo?: string;
+    listTitle?: string;
   };
   warnings: string[];
   rawText: string;
@@ -37,14 +49,17 @@ type ApiOk = {
 type ApiErr = { ok: false; error: string };
 
 type CaseDraft = ApiOk["newCaseInput"] & {
+  pdfKind: CaseSourceDocumentKind;
   meta: ApiOk["meta"] | null;
   rawText: string;
   structuredJson: unknown | null;
+  extractedCaseNumber?: string | null;
 };
 
 export default function ImportPdfCasePage() {
   const router = useRouter();
   const addCase = useAppStore((s) => s.addCase);
+  const updateCase = useAppStore((s) => s.updateCase);
 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -52,6 +67,8 @@ export default function ImportPdfCasePage() {
   const [rawText, setRawText] = useState<string>("");
   const [structuredJson, setStructuredJson] = useState<unknown | null>(null);
   const [meta, setMeta] = useState<ApiOk["meta"] | null>(null);
+  const pdfFileRef = useRef<File | null>(null);
+  const extractedCaseNumberRef = useRef<string | null>(null);
 
   // Draft fields
   const [url, setUrl] = useState("");
@@ -66,14 +83,22 @@ export default function ImportPdfCasePage() {
   const [buildingAreaSqm, setBuildingAreaSqm] = useState("");
   const [parkingUnitCount, setParkingUnitCount] = useState("");
   const [memo, setMemo] = useState("");
+  const [pdfKind, setPdfKind] =
+    useState<CaseSourceDocumentKind>("daejangauction-pdf");
   const autoCreateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creatingRef = useRef(false);
 
   const createCaseFromDraft = useCallback(
-    (draft: CaseDraft) => {
+    async (draft: CaseDraft) => {
       if (creatingRef.current) return;
-      const sourceUrl = draft.sourceUrl.trim() || `pdf-import:${draft.meta?.fileName ?? "upload.pdf"}`;
+      const sourceUrl =
+        draft.sourceUrl.trim() ||
+        `pdf-import:${draft.meta?.fileName ?? "upload.pdf"}`;
       creatingRef.current = true;
+      const listTitle =
+        draft.listTitle?.trim() ||
+        listTitleFromStructuredJson(draft.structuredJson) ||
+        undefined;
       const c = addCase({
         sourceUrl,
         caseNumber: draft.caseNumber?.trim() || undefined,
@@ -87,20 +112,34 @@ export default function ImportPdfCasePage() {
         buildingAreaSqm: draft.buildingAreaSqm ?? null,
         parkingUnitCount: draft.parkingUnitCount ?? null,
         memo: draft.memo?.trim() || undefined,
-        sourceDocuments:
-          draft.meta != null
-            ? [
-                buildPdfSourceDocument({
-                  meta: draft.meta,
-                  rawText: draft.rawText,
-                  structuredJson: draft.structuredJson,
-                }),
-              ]
-            : [],
+        listTitle,
+        sourceDocuments: [],
       });
+
+      if (pdfFileRef.current && draft.meta && draft.rawText) {
+        try {
+          const document = await registerSourcePdfUpload({
+            caseId: c.id,
+            caseNumber: draft.caseNumber,
+            extractedCaseNumber:
+              draft.extractedCaseNumber ??
+              extractedCaseNumberRef.current ??
+              null,
+            kind: draft.pdfKind,
+            file: pdfFileRef.current,
+            meta: draft.meta,
+            rawText: draft.rawText,
+            structuredJson: draft.structuredJson,
+          });
+          updateCase(c.id, { sourceDocuments: [document] });
+        } catch (err) {
+          console.warn("원본 PDF 저장 실패:", err);
+        }
+      }
+
       router.push(`/cases/${c.id}`);
     },
-    [addCase, router],
+    [addCase, router, updateCase],
   );
 
   const onFile = async (f: File) => {
@@ -110,9 +149,11 @@ export default function ImportPdfCasePage() {
     setRawText("");
     setStructuredJson(null);
     setMeta(null);
+    pdfFileRef.current = f;
     try {
       const fd = new FormData();
       fd.set("file", f);
+      fd.set("kind", pdfKind);
       const r = await fetch("/api/pdf-to-case", { method: "POST", body: fd });
       const json = (await r.json()) as ApiOk | ApiErr;
       if (!json.ok) {
@@ -125,8 +166,13 @@ export default function ImportPdfCasePage() {
       setRawText(json.rawText ?? "");
       setStructuredJson(json.structuredJson ?? null);
       const nc = json.newCaseInput;
+      extractedCaseNumberRef.current = json.extracted?.caseNumber ?? null;
 
-      setUrl(nc.sourceUrl ?? `pdf-import:${f.name}`);
+      setUrl(
+        nc.sourceUrl ??
+          json.extracted?.sourceUrl ??
+          `pdf-import:${f.name}`,
+      );
       setCaseNumber(nc.caseNumber ?? "");
       setAddress(nc.address ?? "");
       setPropertyType(nc.propertyType ?? "");
@@ -151,12 +197,17 @@ export default function ImportPdfCasePage() {
       }
       autoCreateTimerRef.current = setTimeout(() => {
         autoCreateTimerRef.current = null;
-        createCaseFromDraft({
+        void createCaseFromDraft({
           ...nc,
-          sourceUrl: nc.sourceUrl ?? `pdf-import:${f.name}`,
+          pdfKind: json.kind ?? pdfKind,
+          sourceUrl:
+            nc.sourceUrl ??
+            json.extracted?.sourceUrl ??
+            `pdf-import:${f.name}`,
           meta: json.meta,
           rawText: json.rawText ?? "",
           structuredJson: json.structuredJson ?? null,
+          extractedCaseNumber: json.extracted?.caseNumber ?? null,
         });
       }, 1000);
     } catch (e) {
@@ -186,8 +237,9 @@ export default function ImportPdfCasePage() {
         ? Math.min(99999, pkParsed)
         : null;
 
-    createCaseFromDraft({
+    void createCaseFromDraft({
       sourceUrl: url.trim(),
+      pdfKind,
       caseNumber,
       address,
       propertyType,
@@ -202,6 +254,7 @@ export default function ImportPdfCasePage() {
       meta,
       rawText,
       structuredJson,
+      extractedCaseNumber: extractedCaseNumberRef.current,
     });
   };
 
@@ -212,13 +265,29 @@ export default function ImportPdfCasePage() {
           PDF로 물건 추가
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          PDF를 업로드하면 텍스트를 추출해 필드를 채웁니다. 저장 전에 반드시
-          검토·수정하세요.
+          경매 PDF를 업로드하면 텍스트를 추출해 필드를 채웁니다. 기본은
+          대장옥션 형식이며, 스피드옥션 PDF는 아래에서 선택하세요.
         </p>
       </div>
 
       <section className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950">
+        <label className="text-sm font-medium">경매 PDF 출처</label>
+        <select
+          value={pdfKind}
+          onChange={(e) =>
+            setPdfKind(e.target.value as CaseSourceDocumentKind)
+          }
+          className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+          disabled={busy}
+        >
+          {AUCTION_PDF_KIND_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+
+        <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950">
           <input
             type="file"
             accept="application/pdf,.pdf"
@@ -425,4 +494,3 @@ export default function ImportPdfCasePage() {
     </div>
   );
 }
-

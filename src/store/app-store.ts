@@ -21,11 +21,16 @@ import type {
   KnowledgeNote,
   MessageTemplate,
   PropertyAnalysisSettings,
+  PdfCoverSettings,
   RemodelingPriceCatalog,
 } from "@/lib/types/domain";
 import { normalizeRemodelingPriceCatalog } from "@/lib/domain/remodeling-catalog";
 import { STORAGE_KEY } from "@/lib/data/storage";
 import { createDefaultAppData } from "@/lib/data/default-data";
+import {
+  markUserDataPresence,
+  snapshotBeforeDestructiveChange,
+} from "@/lib/data/data-protection";
 import { createAuctionCase } from "@/lib/domain/case-factory";
 import { reapplyChecklistsToCase } from "@/lib/domain/checklists";
 import { estimateNextMinPrice } from "@/lib/domain/finance";
@@ -127,6 +132,7 @@ type AppStore = {
   clearLectureGuideForStep: (step: CaseStatus) => void;
   setNoDividendRequestGuide: (text: string) => void;
   setPropertyAnalysisSettings: (patch: Partial<PropertyAnalysisSettings>) => void;
+  setPdfCoverSettings: (patch: Partial<PdfCoverSettings>) => void;
   setRemodelingPriceCatalog: (catalog: RemodelingPriceCatalog) => void;
 
   addKnowledgeNote: (note: Omit<KnowledgeNote, "id" | "createdAt" | "updatedAt">) => void;
@@ -144,6 +150,9 @@ type AppStore = {
   ) => number;
 
   setGuMarketCache: (entry: GuMarketCacheEntry) => void;
+
+  /** 모든 물건의 주변 시세·참고 메모 제거 (구 캐시는 유지) */
+  clearAllMarketData: () => { guCacheKeys: number; casesCleared: number };
 };
 
 function createQuotaSafeLocalStorage(): StateStorage {
@@ -192,20 +201,35 @@ export const useAppStore = create<AppStore>()(
       setBidPdfImportLog: (message) => set({ bidPdfImportLog: message }),
 
       importData: (json, mode) => {
+        const before = get().exportDataJson();
+        const beforeCount = get().data.cases.length;
+        if (mode === "replace" && beforeCount > 0) {
+          snapshotBeforeDestructiveChange(before, "before-import-replace");
+        }
         const incoming = parseAppDataJson(json);
         const base = ensureAppData(get().data);
         const merged = mergeImportedData(base, incoming, mode);
-        set({ data: ensureAppData(merged) });
+        const next = ensureAppData(merged);
+        set({ data: next });
+        markUserDataPresence(next.cases.length);
       },
 
       exportDataJson: () => JSON.stringify(get().data, null, 2),
 
-      resetToDefaults: () => set({ data: createDefaultAppData() }),
+      resetToDefaults: () => {
+        snapshotBeforeDestructiveChange(
+          get().exportDataJson(),
+          "before-reset-to-defaults",
+        );
+        set({ data: createDefaultAppData() });
+      },
 
       addCase: (input) => {
         const data = get().data;
         const c = createAuctionCase(data, input);
-        set({ data: { ...data, cases: [c, ...data.cases] } });
+        const next = { ...data, cases: [c, ...data.cases] };
+        set({ data: next });
+        markUserDataPresence(next.cases.length);
         return c;
       },
 
@@ -452,6 +476,20 @@ export const useAppStore = create<AppStore>()(
           },
         })),
 
+      setPdfCoverSettings: (patch) =>
+        set((s) => ({
+          data: {
+            ...s.data,
+            pdfCoverSettings: {
+              ...s.data.pdfCoverSettings,
+              ...patch,
+              listCrop: patch.listCrop
+                ? { ...s.data.pdfCoverSettings.listCrop, ...patch.listCrop }
+                : s.data.pdfCoverSettings.listCrop,
+            },
+          },
+        })),
+
       setRemodelingPriceCatalog: (catalog) =>
         set((s) => ({
           data: {
@@ -555,6 +593,33 @@ export const useAppStore = create<AppStore>()(
             },
           },
         })),
+
+      clearAllMarketData: () => {
+        const current = get().data;
+        const guCacheKeys = Object.keys(current.guMarketCache ?? {}).length;
+        let casesCleared = 0;
+        const cases = current.cases.map((c) => {
+          const hasMarket =
+            c.nearbyMarketAnalysis != null ||
+            (c.brokerMarketNotes?.length ?? 0) > 0 ||
+            (c.aiMarketNotes?.length ?? 0) > 0;
+          if (!hasMarket) return c;
+          casesCleared += 1;
+          return touchCase({
+            ...c,
+            nearbyMarketAnalysis: null,
+            brokerMarketNotes: [],
+            aiMarketNotes: [],
+          });
+        });
+        set({
+          data: {
+            ...current,
+            cases,
+          },
+        });
+        return { guCacheKeys, casesCleared };
+      },
     }),
     {
       name: STORAGE_KEY,

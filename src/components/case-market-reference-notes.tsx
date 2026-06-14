@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import { DeferredTextarea } from "@/components/deferred-text-input";
 import {
   createMarketReferenceNote,
   MARKET_REFERENCE_TRADE_LABEL,
@@ -215,13 +215,13 @@ function MarketReferenceSection({
                   삭제
                 </button>
               </div>
-              <AutoGrowTextarea
+              <DeferredTextarea
                 className={INPUT}
                 value={note.content}
-                onChange={(e) =>
+                onCommit={(content) =>
                   touch(
                     notes.map((n) =>
-                      n.id === note.id ? { ...n, content: e.target.value } : n,
+                      n.id === note.id ? { ...n, content } : n,
                     ),
                   )
                 }

@@ -6,6 +6,7 @@ import type {
   MessageTemplate,
   PropertyAnalysisSettings,
 } from "@/lib/types/domain";
+import { DEFAULT_PDF_COVER_SETTINGS } from "@/lib/pdf/pdf-cover-settings";
 import { SCHEMA_VERSION } from "@/lib/types/domain";
 
 function tid(prefix: string, i: number): string {
@@ -530,6 +531,7 @@ export function createDefaultAppData(): AppData {
       noDividendRequestGuide: DEFAULT_NO_DIVIDEND_REQUEST_GUIDE,
     },
     propertyAnalysisSettings: { ...DEFAULT_PROPERTY_ANALYSIS_SETTINGS },
+    pdfCoverSettings: structuredClone(DEFAULT_PDF_COVER_SETTINGS),
     messageTemplates: structuredClone(DEFAULT_MESSAGE_TEMPLATES),
     knowledgeNotes: [],
     sharedExternalAiQa: [],

@@ -2,7 +2,11 @@ const DB_NAME = "auctionflow-case-media";
 const DB_VERSION = 1;
 const STORE = "blobs";
 
-export type CaseMediaKind = "field-photo" | "report-html";
+export type CaseMediaKind =
+  | "field-photo"
+  | "list-thumbnail"
+  | "report-html"
+  | "source-document";
 
 function storageKey(
   caseId: string,

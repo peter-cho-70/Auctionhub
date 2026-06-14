@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createRequire } from "node:module";
-import { parseAuctionPdfText } from "@/lib/pdf/auction-pdf-parser";
+import { parseAuctionPdfByKind } from "@/lib/pdf/auction-pdf-parser";
 import { buildStructuredJsonForDocument } from "@/lib/pdf/auctionone-structured";
 import type { CaseSourceDocumentKind } from "@/lib/types/domain";
 
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
 
     const rawText = String(text.text ?? "");
     const pageCount = Array.isArray(text.pages) ? text.pages.length : null;
-    const extracted = parseAuctionPdfText(rawText);
+    const extracted = parseAuctionPdfByKind(rawText, kind);
     const meta = {
       fileName: file.name,
       fileSize: file.size,
@@ -69,13 +69,17 @@ export async function POST(req: Request) {
 }
 
 function normalizeKind(raw: FormDataEntryValue | null): CaseSourceDocumentKind {
-  return raw === "registry-building" ||
+  return raw === "daejangauction-pdf" ||
+    raw === "speedauction-pdf" ||
+    raw === "auctionone-pdf" ||
+    raw === "registry-building" ||
     raw === "registry-land" ||
     raw === "building-ledger" ||
     raw === "appraisal-report" ||
     raw === "tenant-report" ||
+    raw === "expected-dividend" ||
     raw === "pdf"
     ? raw
-    : "building-ledger";
+    : "daejangauction-pdf";
 }
 

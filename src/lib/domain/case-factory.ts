@@ -55,6 +55,7 @@ export interface NewCaseInput {
   buildingCoverageRatio?: string;
   floorAreaRatio?: string;
   lienBaseline?: string;
+  listTitle?: string;
   sourceDocuments?: CaseSourceDocument[];
   initialStatus?: CaseStatus;
 }
@@ -73,6 +74,9 @@ export function createAuctionCase(
     sourceUrl: parsed.normalizedUrl || input.sourceUrl.trim(),
     caseNumber: input.caseNumber?.trim() || parsed.caseNumber,
     address: input.address?.trim() || parsed.address,
+    listTitle: input.listTitle?.trim() ?? "",
+    listColor: null,
+    listThumbnail: null,
     addressMeta: input.addressMeta ?? null,
     propertyType: input.propertyType?.trim() || "",
     builtYear: input.builtYear?.trim() ?? "",

@@ -11,11 +11,11 @@ import {
   lineTotalManwon,
 } from "@/lib/domain/remodeling";
 import type { RemodelingPhase } from "@/lib/types/domain";
+import { formatManwonWithSuffix } from "@/lib/format/manwon";
+import { TABLE_COMPACT, TC_MONEY, TC_TD, TC_TH } from "@/lib/ui/compact-table";
 import { useAppStore } from "@/store/app-store";
 
-function formatManwon(n: number): string {
-  return `${n.toLocaleString("ko-KR")}만원`;
-}
+const formatManwon = formatManwonWithSuffix;
 
 export function RemodelingGuideClient() {
   const cases = useAppStore((s) => s.data.cases);
@@ -129,26 +129,26 @@ export function RemodelingGuideClient() {
         <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
           <h3 className="font-semibold">진단 체크리스트</h3>
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left text-xs">
+            <table className={TABLE_COMPACT}>
               <thead>
                 <tr className="border-b text-neutral-500">
-                  <th className="py-2 pr-2">항목</th>
-                  <th className="py-2 pr-2">확인</th>
-                  <th className="py-2 pr-2">양호</th>
-                  <th className="py-2">조치</th>
+                  <th className={`${TC_TH} w-24`}>항목</th>
+                  <th className={TC_TH}>확인</th>
+                  <th className={TC_TH}>양호</th>
+                  <th className={TC_TH}>조치</th>
                 </tr>
               </thead>
               <tbody>
                 {checklist.map((item) => (
                   <tr key={item.id} className="border-b border-neutral-100 dark:border-neutral-800">
-                    <td className="py-2 pr-2 font-medium">{item.label}</td>
-                    <td className="py-2 pr-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} w-24 font-medium`}>{item.label}</td>
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {item.method}
                     </td>
-                    <td className="py-2 pr-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {item.okCriteria}
                     </td>
-                    <td className="py-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {item.action}
                     </td>
                   </tr>
@@ -161,28 +161,28 @@ export function RemodelingGuideClient() {
         <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
           <h3 className="font-semibold">비용 항목 (만원)</h3>
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[480px] text-left text-xs">
+            <table className={TABLE_COMPACT}>
               <thead>
                 <tr className="border-b text-neutral-500">
-                  <th className="py-2 pr-2">항목</th>
-                  <th className="py-2 pr-2">자재</th>
-                  <th className="py-2 pr-2">인건비</th>
-                  <th className="py-2 pr-2">DIY</th>
-                  <th className="py-2">효과</th>
+                  <th className={`${TC_TH} w-28`}>항목</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>자재</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>인건비</th>
+                  <th className={`${TC_TH} w-10`}>DIY</th>
+                  <th className={TC_TH}>효과</th>
                 </tr>
               </thead>
               <tbody>
                 {costLines.map((line) => (
                   <tr key={line.id} className="border-b border-neutral-100 dark:border-neutral-800">
-                    <td className="py-2 pr-2 font-medium">{line.item}</td>
-                    <td className="py-2 pr-2 tabular-nums">
+                    <td className={`${TC_TD} w-28 font-medium`}>{line.item}</td>
+                    <td className={`${TC_TD} ${TC_MONEY} tabular-nums`}>
                       {line.materialManwon ?? "—"}
                     </td>
-                    <td className="py-2 pr-2 tabular-nums">
+                    <td className={`${TC_TD} ${TC_MONEY} tabular-nums`}>
                       {line.laborManwon ?? "—"}
                     </td>
-                    <td className="py-2 pr-2">{line.diy ? "가능" : "—"}</td>
-                    <td className="py-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} w-10`}>{line.diy ? "가능" : "—"}</td>
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {line.effectNote}
                     </td>
                   </tr>

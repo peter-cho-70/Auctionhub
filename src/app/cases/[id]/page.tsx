@@ -4,6 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { InputHTMLAttributes } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppExperienceToggle } from "@/components/app-experience-toggle";
+import { CaseDetailRenewalSection } from "@/components/case-detail-renewal-section";
+import { CaseQuickPdfUpload } from "@/components/case-quick-pdf-upload";
+import {
+  readAppExperienceMode,
+  type AppExperienceMode,
+  writeAppExperienceMode,
+} from "@/lib/ui/app-experience-mode";
 import { CopyButton } from "@/components/copy-button";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PercentRateInput } from "@/components/percent-rate-input";
@@ -18,6 +26,13 @@ import {
   parseAreaSqmInputToNumber,
 } from "@/lib/format/area-input";
 import { formatWonDigits, formatWonWithUnit, parseWonInput } from "@/lib/format/won";
+import {
+  TABLE_COMPACT,
+  TC_MONEY,
+  TC_TD,
+  TC_TH,
+  TC_UNIT,
+} from "@/lib/ui/compact-table";
 import { canSecondBidderReport } from "@/lib/domain/finance";
 import type {
   AuctionCase,
@@ -35,7 +50,14 @@ import type {
 } from "@/lib/types/domain";
 import { AddressSearchField } from "@/components/address-search-field";
 import { resolveMolitLawdCode } from "@/lib/address/lawd-code";
-import { guMarketCacheKey } from "@/lib/data/gu-market-cache";
+import { caseListTitle } from "@/lib/domain/case-list-display";
+import {
+  CaseListThumbnailEditor,
+  CaseListThumbnailImg,
+  deleteCaseListThumbnailMedia,
+} from "@/components/case-list-thumbnail-ui";
+import { CaseListTitleInput } from "@/components/case-list-title-input";
+import { guMarketCacheKey, MOLIT_RENT_MONTHS, MOLIT_SALE_MONTHS } from "@/lib/data/gu-market-cache";
 import {
   molitGisUrl,
   naverLandSearchUrl,
@@ -51,9 +73,10 @@ import { CaseAiAnalysisPanel } from "@/components/case-ai-analysis-panel";
 import { CaseAuctionBidAnalysisPanel } from "@/components/case-auction-bid-analysis-panel";
 import { CaseAnalysisReportPanel } from "@/components/case-analysis-report-panel";
 import { CaseTenantRecordsPanel } from "@/components/case-tenant-records-panel";
+import { TenantAnalysisCompactTable } from "@/components/tenant/tenant-analysis-compact-table";
 import { FieldPhotoGalleryPanel } from "@/components/field-photo-gallery-panel";
-import { CaseDetailViewToggle } from "@/components/case-detail-view-toggle";
 import { CasePhaseWorkflowNav } from "@/components/case-phase-workflow-nav";
+import { CaseLoanInquiryPanel } from "@/components/case-loan-inquiry-panel";
 import { CasePostAuctionPanel } from "@/components/case-post-auction-panel";
 import { CaseRentSettingPanel } from "@/components/case-rent-setting-panel";
 import {
@@ -67,6 +90,10 @@ import {
   normalizeRentSetting,
   PYEONG_TO_SQM,
 } from "@/lib/domain/rent-setting";
+import {
+  applyRentSettingFromTenants,
+  hasMeaningfulRentUnitRows,
+} from "@/lib/domain/rent-setting-from-tenants";
 import {
   computePreFieldInfoReadiness,
   normalizeMultiFamilyAnalysis,
@@ -87,7 +114,37 @@ import {
   extractCaseDocumentFacts,
 } from "@/lib/domain/case-document-facts";
 import { DEFAULT_NO_DIVIDEND_REQUEST_GUIDE } from "@/lib/data/default-data";
-import { buildPdfSourceDocument } from "@/lib/pdf/auctionone-structured";
+import { syncTenantRecordsFromExpectedDividend } from "@/lib/domain/case-tenant-records";
+import {
+  distributionStatusLabel,
+  getExpectedDividendFromDocuments,
+  resolveTenantDistributionView,
+  tenantNameToneFromDistribution,
+  type TenantDistributionView,
+} from "@/lib/domain/tenant-dividend-display";
+import {
+  applyTenantMetadataFromSpecification,
+  compareTenantUnit,
+  resetTenantRowsFromSpecification,
+  sortTenantRowsByUnit,
+} from "@/lib/domain/tenant-spec-merge";
+import { EXPECTED_DIVIDEND_PARSER_VERSION } from "@/lib/pdf/expected-dividend-parser";
+import { registerSourcePdfUpload } from "@/lib/pdf/register-source-pdf-upload";
+import {
+  deleteAllSourcePdfBlobsForCase,
+  downloadBlobAsFile,
+  getSourcePdfBlob,
+  openSourcePdfInNewTab,
+} from "@/lib/pdf/store-source-pdf";
+import {
+  formatAppraisalBreakdown,
+  formatMinPriceLine,
+  speedAuctionDisplayMetaForCase,
+} from "@/lib/pdf/speed-auction-case-meta";
+import {
+  normalizeCaseNumber,
+  sourceDocumentKindFileLabel,
+} from "@/lib/pdf/stored-pdf-name";
 import {
   LAST_CASE_TAB_KEY_PREFIX,
   LAST_SELECTED_CASE_KEY,
@@ -98,9 +155,6 @@ import {
   type PostAuctionPackageId,
   type PreAuctionBlockId,
 } from "@/lib/domain/case-workflow";
-import { CLASSIC_CASE_DETAIL_UI_V1 } from "@/lib/ui/case-detail-ui-versions";
-import { readCaseDetailViewMode } from "@/lib/ui/case-detail-view-mode";
-import type { CaseDetailViewMode } from "@/lib/ui/case-detail-ui-versions";
 import type { CasePhase } from "@/lib/types/domain";
 import { useAppStore } from "@/store/app-store";
 
@@ -144,6 +198,16 @@ const TAB_KEYS: Tab[] = [
 ];
 
 const MONEY_EXTRA_KEYS = ["낙찰가", "보증금", "내입찰가"] as const;
+const LOAN_INQUIRY_EXTRA_KEYS = [
+  "명의",
+  "현주택수",
+  "소득요약",
+  "카드사용",
+  "부채요약",
+  "물건특징",
+  "매도전략",
+  "낙찰가",
+] as const;
 
 const SOURCE_DOCUMENT_KIND_OPTIONS: {
   value: CaseSourceDocumentKind;
@@ -151,9 +215,14 @@ const SOURCE_DOCUMENT_KIND_OPTIONS: {
   help: string;
 }[] = [
   {
-    value: "auctionone-pdf",
-    label: "옥션원 경매 PDF",
-    help: "물건 기본정보, 임차인 현황, 등기부 권리까지 함께 추출",
+    value: "daejangauction-pdf",
+    label: "대장옥션 경매 PDF",
+    help: "임차인·등기·입찰기일까지 포함. 기본 경매 PDF 형식",
+  },
+  {
+    value: "speedauction-pdf",
+    label: "스피드옥션 경매 PDF",
+    help: "물건 기본정보, 감정·면적, 임차인, 등기부 권리까지 함께 추출",
   },
   {
     value: "registry-building",
@@ -179,6 +248,11 @@ const SOURCE_DOCUMENT_KIND_OPTIONS: {
     value: "tenant-report",
     label: "임차인 현황 문서",
     help: "호실별 임차인, 전입일, 보증금, 배당요구 정보 추출",
+  },
+  {
+    value: "expected-dividend",
+    label: "예상배당표",
+    help: "스피드옥션 예상배당표 PDF에서 입찰가·호실별 배당액 추출",
   },
 ];
 
@@ -369,6 +443,14 @@ const FIELD_OCCUPANCY_OPTIONS = [
   { value: "vacant", label: "미거주" },
 ] as const;
 
+const FIELD_CONTRACT_INTENT_OPTIONS = [
+  { value: "", label: "자동" },
+  { value: "renew", label: "계약연장" },
+  { value: "vacate", label: "퇴거·공실" },
+  { value: "relet", label: "신규임대" },
+  { value: "unknown", label: "미확인" },
+] as const;
+
 type PdfToJsonOk = {
   ok: true;
   meta: {
@@ -376,6 +458,7 @@ type PdfToJsonOk = {
     fileSize: number;
     pageCount: number | null;
   };
+  extracted?: { caseNumber?: string | null };
   rawText: string;
   structuredJson: unknown;
 };
@@ -452,9 +535,6 @@ export default function CaseDetailPage() {
     return isTab(saved) ? saved : "basic";
   });
 
-  const [detailViewMode, setDetailViewMode] = useState<CaseDetailViewMode>(() =>
-    typeof window === "undefined" ? "phase" : readCaseDetailViewMode(),
-  );
   const [phaseUiBlock, setPhaseUiBlock] = useState<PreAuctionBlockId | null>(null);
   const [phaseUiPackage, setPhaseUiPackage] = useState<PostAuctionPackageId | null>(
     null,
@@ -493,6 +573,15 @@ export default function CaseDetailPage() {
   const [landSqmInput, setLandSqmInput] = useState("");
   const [buildingSqmInput, setBuildingSqmInput] = useState("");
   const [parkingCountInput, setParkingCountInput] = useState("");
+
+  const [experienceMode, setExperienceMode] = useState<AppExperienceMode>(() =>
+    readAppExperienceMode(),
+  );
+
+  const handleExperienceModeChange = useCallback((mode: AppExperienceMode) => {
+    writeAppExperienceMode(mode);
+    setExperienceMode(mode);
+  }, []);
 
   useEffect(() => {
     if (!c) return;
@@ -564,6 +653,13 @@ export default function CaseDetailPage() {
         Pick<AuctionCase, "auctionSaleComparables" | "auctionBidAnalysis">
       >,
     ) => {
+      updateCase(id, patch);
+    },
+    [id, updateCase],
+  );
+
+  const saveWorkflowPatch = useCallback(
+    (patch: Parameters<typeof updateCase>[1]) => {
       updateCase(id, patch);
     },
     [id, updateCase],
@@ -672,6 +768,18 @@ export default function CaseDetailPage() {
   const saveRentSetting = (rentSetting: Parameters<typeof normalizeRentSetting>[0]) => {
     updateCase(id, { rentSetting: normalizeRentSetting(rentSetting) });
   };
+  const prefillRentSettingFromTenants = () => {
+    const next = normalizeRentSetting(applyRentSettingFromTenants(c, "fillEmpty"));
+    const derived = computeRentSettingDerived(next);
+    saveRentSetting({
+      ...next,
+      investmentYield: {
+        ...next.investmentYield,
+        totalDeposit: derived.totalDeposit,
+        totalMonthlyRent: derived.totalMonthlyRent,
+      },
+    });
+  };
   const applyMarketRentToRentSetting = (
     listing: MarketListingItem,
     mode: RentSettingApplyMode,
@@ -769,7 +877,7 @@ export default function CaseDetailPage() {
   };
 
   const handleDeleteCase = () => {
-    const title = c.address || c.caseNumber || "이 물건";
+    const title = caseListTitle(c);
     if (
       !confirm(
         `${title}을 삭제할까요?\n삭제 후에는 현재 브라우저 저장 데이터에서 제거됩니다.`,
@@ -777,45 +885,89 @@ export default function CaseDetailPage() {
     ) {
       return;
     }
-    router.replace("/cases");
     deleteCase(id);
+    void deleteCaseListThumbnailMedia(id);
+    void deleteAllSourcePdfBlobsForCase(id, c.sourceDocuments ?? []);
+    if (typeof window !== "undefined") {
+      const last = window.localStorage.getItem(LAST_SELECTED_CASE_KEY);
+      if (last === id) {
+        window.localStorage.removeItem(LAST_SELECTED_CASE_KEY);
+      }
+    }
+    router.replace("/cases");
   };
-
-  const tabs: { key: Tab; label: string }[] = CLASSIC_CASE_DETAIL_UI_V1.tabs.map(
-    (t) => ({ key: t.key as Tab, label: t.label }),
-  );
 
   const workflowPhase: CasePhase =
     c.casePhase === "closed" ? "closed" : c.casePhase;
   const phaseNavPhase: CasePhase =
     workflowPhase === "closed" ? inferCasePhaseFromStatus(c.status) : workflowPhase;
+  const postLoanInquiryView =
+    phaseNavPhase === "post_auction" && phaseUiPackage === "loan";
+  const postEvictionTenantView =
+    phaseNavPhase === "post_auction" && phaseUiPackage === "eviction";
+  const postLeasingRentView =
+    phaseNavPhase === "post_auction" && phaseUiPackage === "leasing";
 
-  const saveWorkflowPatch = useCallback(
-    (patch: Parameters<typeof updateCase>[1]) => {
-      updateCase(id, patch);
-    },
-    [id, updateCase],
-  );
+  const speedMeta = speedAuctionDisplayMetaForCase(c);
+  const appraisalLine =
+    speedMeta != null ? formatAppraisalBreakdown(speedMeta) : null;
+  const minPriceLine =
+    speedMeta != null ? formatMinPriceLine(speedMeta, c.minPrice) : null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <Link
             href="/cases"
-            className="text-xs text-neutral-500 hover:underline"
+            className="mb-2 inline-block text-xs text-neutral-500 hover:underline"
           >
             ← 목록
           </Link>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">
-            {[c.caseNumber, c.address].filter(Boolean).join(" · ") || "물건 상세"}
-          </h1>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            {STATUS_LABELS[c.status]}
-            {c.bidDate && ` · 입찰 ${c.bidDate}`}
-          </p>
+          <div className="flex min-w-0 items-start gap-3">
+            <CaseListThumbnailImg
+              caseId={id}
+              thumbnail={c.listThumbnail}
+              className="h-24 w-24 shrink-0 rounded-lg object-cover shadow-sm"
+              placeholderClassName="h-24 w-24 shrink-0 rounded-lg border border-dashed border-neutral-200 bg-neutral-50 shadow-sm dark:border-neutral-800 dark:bg-neutral-900/60"
+            />
+            <div className="min-w-0 flex-1 flex flex-col gap-1 pt-0.5">
+              <CaseListTitleInput
+                caseData={c}
+                multiline
+                onSave={(listTitle) => updateCase(id, { listTitle })}
+                className="rounded-md border border-transparent bg-transparent px-0 py-0 text-lg font-semibold leading-snug tracking-tight hover:border-neutral-200 focus:border-neutral-300 focus:bg-white focus:px-2 focus:py-1 focus:outline-none dark:hover:border-neutral-700 dark:focus:border-neutral-600 dark:focus:bg-neutral-900"
+              />
+              <p className="text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">
+                {STATUS_LABELS[c.status]}
+                {c.bidDate && ` · 입찰 ${c.bidDate}`}
+                {speedMeta?.debtor &&
+                  !caseListTitle(c).includes(speedMeta.debtor) &&
+                  ` · 채무자 ${speedMeta.debtor}`}
+              </p>
+              {(appraisalLine || minPriceLine) && (
+                <p className="text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
+                  {[appraisalLine, minPriceLine].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              {speedMeta?.propertyType && (
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  {speedMeta.propertyType}
+                  {speedMeta.currentRound != null &&
+                    ` · ${speedMeta.currentRound}차`}
+                  {speedMeta.tenantCount != null &&
+                    ` · 임차인 ${speedMeta.tenantCount}명`}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+          <AppExperienceToggle
+            compact
+            value={experienceMode}
+            onChange={handleExperienceModeChange}
+          />
           <label className="flex items-center gap-2 text-sm">
             <span className="text-neutral-500">상태</span>
             <select
@@ -842,6 +994,11 @@ export default function CaseDetailPage() {
             />
             낙찰 당일 액션 완료
           </label>
+          <CaseQuickPdfUpload
+            caseId={id}
+            caseNumber={c.caseNumber}
+            onDocumentAdded={addSourceDocument}
+          />
           <button
             type="button"
             onClick={handleDeleteCase}
@@ -852,42 +1009,29 @@ export default function CaseDetailPage() {
         </div>
       </div>
 
-      <CaseDetailViewToggle value={detailViewMode} onChange={setDetailViewMode} />
-
-      {detailViewMode === "phase" ? (
-        <CasePhaseWorkflowNav
+      {experienceMode === "renewal" && (
+        <CaseDetailRenewalSection
+          caseId={id}
           caseData={c}
-          phase={phaseNavPhase}
-          onPhaseChange={(p) => saveWorkflowPatch({ casePhase: p })}
-          activeTab={tab}
-          onSelectTab={setTab}
-          activeBlockId={phaseUiBlock}
-          activePackageId={phaseUiPackage}
-          onSelectBlock={setPhaseUiBlock}
-          onSelectPackage={setPhaseUiPackage}
+          onListThumbnailChange={(listThumbnail) => updateCase(id, { listThumbnail })}
         />
-      ) : (
-        <div className="flex flex-wrap gap-1 border-b border-neutral-200 pb-2 dark:border-neutral-800">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`rounded-md px-2.5 py-1.5 text-sm ${
-                tab === t.key
-                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                  : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
       )}
 
+      <CasePhaseWorkflowNav
+        caseData={c}
+        phase={phaseNavPhase}
+        onPhaseChange={(p) => saveWorkflowPatch({ casePhase: p })}
+        activeTab={tab}
+        onSelectTab={setTab}
+        activeBlockId={phaseUiBlock}
+        activePackageId={phaseUiPackage}
+        onSelectBlock={setPhaseUiBlock}
+        onSelectPackage={setPhaseUiPackage}
+      />
+
       {tab === "basic" && (
-        <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        <section className="space-y-2 rounded-xl border border-neutral-200 bg-white p-2.5 dark:border-neutral-800 dark:bg-neutral-950">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400">
             필드를 수정한 뒤 저장하세요. 체크리스트 구조는 &quot;프로세스&quot;
             메뉴에서 바꾼 뒤, 아래 버튼으로 이 물건에 다시 적용할 수 있습니다.
           </p>
@@ -960,6 +1104,9 @@ export default function CaseDetailPage() {
               <label className="text-xs font-medium text-neutral-500">
                 높은 토지가격 기준 (만원/㎡ 이상)
                 <input
+                  type="number"
+                  min={0}
+                  step="0.1"
                   inputMode="decimal"
                   className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
                   value={propertyAnalysisSettings.highLandPricePerSqmManwon}
@@ -1059,7 +1206,7 @@ export default function CaseDetailPage() {
                 mapLng={c.nearbyMarketAnalysis?.lng}
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-4 sm:col-span-2">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 sm:col-span-2">
               <div>
                 <label className="text-xs font-medium text-neutral-500">
                   물건 유형
@@ -1137,7 +1284,7 @@ export default function CaseDetailPage() {
                 />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 sm:col-span-2">
+            <div className="grid gap-2 sm:grid-cols-2 sm:col-span-2">
               <div>
                 <label className="text-xs font-medium text-neutral-500">
                   주택 호수
@@ -1186,7 +1333,7 @@ export default function CaseDetailPage() {
                 />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3 sm:col-span-2">
+            <div className="grid gap-2 sm:grid-cols-2 sm:col-span-2">
               <div>
                 <BasicFieldLabel missing={basicPreFieldMissing.has("landAreaSqm")}>
                   토지면적 (㎡)
@@ -1255,7 +1402,7 @@ export default function CaseDetailPage() {
                 위반건축 (건축물대장 등)
               </label>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3 sm:col-span-2">
+            <div className="grid gap-2 sm:grid-cols-2 sm:col-span-2">
               <div>
                 <BasicFieldLabel
                   missing={basicPreFieldMissing.has("buildingCoverageRatio")}
@@ -1803,6 +1950,7 @@ export default function CaseDetailPage() {
         <CaseRentSettingPanel
           key={id}
           caseData={viewCase}
+          leasingFocus={postLeasingRentView}
           templateExtras={extras}
           onSave={saveRentSetting}
         />
@@ -1865,21 +2013,23 @@ export default function CaseDetailPage() {
 
       {tab === "source_docs" && (
         <SourceDocumentsPanel
+          caseId={id}
+          caseNumber={c.caseNumber}
           documents={c.sourceDocuments}
+          listThumbnail={c.listThumbnail}
           onAddDocument={addSourceDocument}
+          onListThumbnailChange={(listThumbnail) => {
+            updateCase(id, { listThumbnail });
+          }}
         />
       )}
 
       {tab === "tenant_analysis" && (
-        <div className="space-y-4">
-          <CaseTenantRecordsPanel
-            caseData={c}
-            onChange={(tenantRecords) => {
-              updateCase(id, { tenantRecords });
-              syncDraftFromCase();
-            }}
-          />
+        <div className="space-y-3">
           <TenantAnalysisPanel
+            caseId={id}
+            caseNumber={c.caseNumber}
+            compact={postEvictionTenantView}
             documents={c.sourceDocuments}
             onDocumentsChange={updateSourceDocumentsFromAnalysis}
             noDividendRequestGuide={noDividendRequestGuide}
@@ -1888,7 +2038,37 @@ export default function CaseDetailPage() {
             fallbackMinimumPrice={c.minPrice}
             fallbackExpectedBidPrice={c.expectedBidPrice}
             fallbackAppraisalPrice={c.appraisalPrice}
+            tenantRecords={c.tenantRecords}
+            onExpectedBidPriceChange={(expectedBidPrice) => {
+              updateCase(id, { expectedBidPrice });
+              syncDraftFromCase();
+            }}
+            onTenantRecordsChange={(tenantRecords) => {
+              updateCase(id, { tenantRecords });
+              syncDraftFromCase();
+            }}
+            onTenantSpecApplied={() => {
+              if (!hasMeaningfulRentUnitRows(c.rentSetting?.unitRows)) {
+                prefillRentSettingFromTenants();
+              }
+            }}
           />
+          {!postEvictionTenantView && (
+            <details className="rounded-xl border border-amber-200/80 bg-amber-50/20 dark:border-amber-900/50 dark:bg-amber-950/10">
+              <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-amber-950 dark:text-amber-100">
+                §8 보고서 표 · 인쇄 (펼치기)
+              </summary>
+              <div className="border-t border-amber-200/60 px-2 pb-2 pt-1 dark:border-amber-900/40">
+                <CaseTenantRecordsPanel
+                  caseData={c}
+                  onChange={(tenantRecords) => {
+                    updateCase(id, { tenantRecords });
+                    syncDraftFromCase();
+                  }}
+                />
+              </div>
+            </details>
+          )}
         </div>
       )}
 
@@ -2147,32 +2327,41 @@ export default function CaseDetailPage() {
         </section>
       )}
 
-      {tab === "templates" && (
-        <section className="space-y-6">
-          <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
-            <h3 className="font-medium">템플릿에 넣을 추가 값</h3>
-            <p className="mt-1 text-xs text-neutral-500">
+      {tab === "templates" && postLoanInquiryView && (
+        <CaseLoanInquiryPanel
+          caseData={viewCase}
+          templateBody={
+            templates.find(
+              (tm) =>
+                tm.id === "tmpl-loan-inquiry" ||
+                tm.category === "loan_inquiry",
+            )?.body ?? ""
+          }
+          extras={extras}
+          onExtrasChange={setExtras}
+          onSave={(patch) => saveWorkflowPatch(patch)}
+        />
+      )}
+
+      {tab === "templates" && !postLoanInquiryView && (
+        <section className="space-y-3">
+          <div className="rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-950">
+            <h3 className="text-sm font-medium">문자에 넣을 추가 값</h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
               물건 기본 필드 외에 문자에 필요한 값입니다.
             </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {(
                 [
-                  "명의",
-                  "현주택수",
-                  "소득요약",
-                  "카드사용",
-                  "부채요약",
-                  "물건특징",
-                  "매도전략",
-                  "낙찰가",
+                  ...LOAN_INQUIRY_EXTRA_KEYS,
                   "보증금",
                   "내입찰가",
                 ] as const
               ).map((key) => (
-                <label key={key} className="text-xs">
+                <label key={key} className="text-xs font-medium text-neutral-600">
                   {key}
                   <input
-                    className="mt-1 w-full rounded border border-neutral-200 px-2 py-1 tabular-nums dark:border-neutral-800 dark:bg-neutral-900"
+                    className="mt-0.5 w-full rounded border border-neutral-200 px-2 py-1.5 text-sm tabular-nums dark:border-neutral-800 dark:bg-neutral-900"
                     inputMode={
                       (MONEY_EXTRA_KEYS as readonly string[]).includes(key)
                         ? "numeric"
@@ -2203,13 +2392,13 @@ export default function CaseDetailPage() {
             return (
               <div
                 key={tm.id}
-                className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950"
+                className="rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-950"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-medium">{tm.name}</h3>
+                  <h3 className="text-sm font-medium">{tm.name}</h3>
                   <CopyButton text={body} label="원클릭 복사" />
                 </div>
-                <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-3 text-xs dark:bg-neutral-900">
+                <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-3 text-sm dark:bg-neutral-900">
                   {body}
                 </pre>
               </div>
@@ -2310,10 +2499,17 @@ function NearbyMarketAnalysisPanel({
   const setGuMarketCache = useAppStore((s) => s.setGuMarketCache);
   const analysis = caseData.nearbyMarketAnalysis;
   const hasMolitMarketData = marketMolitDataAppliesToCase(caseData);
+  const lawdCode = resolveMolitLawdCode(caseData.address, caseData.addressMeta);
+  const guCacheEntry =
+    lawdCode && guMarketCache[guMarketCacheKey(lawdCode)]
+      ? guMarketCache[guMarketCacheKey(lawdCode)]
+      : null;
+  const guCacheMolitCount =
+    guCacheEntry?.listings.filter((item) => item.source === "molit").length ?? 0;
+  const reusableMarketCases = findReusableMarketCases(allCases, caseData);
   const sortedListings = analysis
     ? sortMarketListingsForCase(analysis.listings, caseData)
     : [];
-  const reusableMarketCases = findReusableMarketCases(allCases, caseData);
   const tenantRentComparisons = analysis
     ? buildTenantRentComparisons(caseData, analysis)
     : [];
@@ -2413,6 +2609,34 @@ function NearbyMarketAnalysisPanel({
     } finally {
       setMarketBusy(false);
     }
+  };
+
+  const reuseFromGuCache = () => {
+    if (hasMolitMarketData) {
+      setMessage(
+        "이 물건에 국토부 주변 시세가 이미 있습니다. 다른 데이터를 쓰려면 「분석 데이터 제거」 후 진행하세요.",
+      );
+      return;
+    }
+    if (!guCacheEntry || guCacheMolitCount === 0) {
+      setMessage("이 구에 저장된 국토부 캐시가 없습니다. 「주변 시세 조회」로 먼저 수집하세요.");
+      return;
+    }
+    const reused = buildNearbyMarketAnalysisFromListings(
+      guCacheEntry.listings,
+      {
+        city: guCacheEntry.city,
+        gu: guCacheEntry.gu,
+        saleMonths: MOLIT_SALE_MONTHS,
+        rentMonths: MOLIT_RENT_MONTHS,
+        months: MOLIT_RENT_MONTHS,
+      },
+      caseData,
+    );
+    onImport(reused);
+    setMessage(
+      `저장된 ${guCacheEntry.gu || "같은 구"} 국토부 캐시 ${reused.molitCount}건을 현재 물건 기준으로 적용했습니다.`,
+    );
   };
 
   const reuseNearbyMarket = (sourceCase: AuctionCase) => {
@@ -2527,14 +2751,24 @@ function NearbyMarketAnalysisPanel({
               네이버 부동산 지도
             </a>
           </div>
-          {!hasMolitMarketData && reusableMarketCases.length > 0 && (
+          {!hasMolitMarketData &&
+            (guCacheMolitCount > 0 || reusableMarketCases.length > 0) && (
             <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
               <p className="font-medium">같은 구 기존 시세 재사용</p>
               <p className="mt-1 opacity-80">
-                저장된 같은 구 시세를 현재 물건의 동·면적·준공·세입자 조건으로
-                다시 정렬해 사용합니다.
+                저장된 구 캐시 또는 다른 물건의 시세를 현재 물건의 동·면적·준공·세입자
+                조건으로 다시 정렬해 사용합니다.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
+                {guCacheMolitCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={reuseFromGuCache}
+                    className="rounded-lg border border-sky-400 bg-white px-2.5 py-1.5 text-xs font-medium text-sky-900 dark:border-sky-700 dark:bg-neutral-950 dark:text-sky-100"
+                  >
+                    구 캐시 ({guCacheEntry?.gu || "같은 구"}) · {guCacheMolitCount}건
+                  </button>
+                )}
                 {reusableMarketCases.slice(0, 5).map((sourceCase) => (
                   <button
                     key={sourceCase.id}
@@ -2870,44 +3104,44 @@ function NearbyMarketAnalysisPanel({
               매물·실거래 상세 {sortedListings.length}건
             </summary>
             <div className="mt-3 max-h-[520px] overflow-auto">
-              <table className="w-full min-w-[820px] text-xs">
+              <table className={TABLE_COMPACT}>
                 <thead className="sticky top-0 bg-neutral-100 dark:bg-neutral-900">
                   <tr>
-                    <th className="px-2 py-2 text-left">출처</th>
-                    <th className="px-2 py-2 text-left">거래</th>
-                    <th className="px-2 py-2 text-left">룸</th>
-                    <th className="px-2 py-2 text-left">동/주소</th>
-                    <th className="px-2 py-2 text-right">면적</th>
-                    <th className="px-2 py-2 text-right">보증금</th>
-                    <th className="px-2 py-2 text-right">월세</th>
-                    <th className="px-2 py-2 text-right">매매가</th>
-                    <th className="px-2 py-2 text-left">일자</th>
-                    <th className="px-2 py-2 text-left">적용</th>
+                    <th className={`${TC_TH} w-14`}>출처</th>
+                    <th className={`${TC_TH} w-12`}>거래</th>
+                    <th className={`${TC_TH} w-14`}>룸</th>
+                    <th className={TC_TH}>동/주소</th>
+                    <th className={`${TC_TH} w-14 text-right`}>면적</th>
+                    <th className={`${TC_TH} ${TC_MONEY} text-right`}>보증금</th>
+                    <th className={`${TC_TH} w-[4.5rem] text-right`}>월세</th>
+                    <th className={`${TC_TH} ${TC_MONEY} text-right`}>매매가</th>
+                    <th className={`${TC_TH} w-16`}>일자</th>
+                    <th className={`${TC_TH} w-20`}>적용</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedListings.slice(0, 120).map((item) => (
                     <tr key={item.id} className="border-t border-neutral-100 dark:border-neutral-900">
-                      <td className="px-2 py-1.5">{item.source}</td>
-                      <td className="px-2 py-1.5">{item.tradeType}</td>
-                      <td className="px-2 py-1.5">{item.roomType}</td>
-                      <td className="px-2 py-1.5">
+                      <td className={`${TC_TD} w-14`}>{item.source}</td>
+                      <td className={`${TC_TD} w-12`}>{item.tradeType}</td>
+                      <td className={`${TC_TD} w-14`}>{item.roomType}</td>
+                      <td className={TC_TD}>
                         {item.dong || item.address || item.title || "-"}
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className={`${TC_TD} w-14 text-right`}>
                         {item.areaSqm != null ? `${item.areaSqm}㎡` : "-"}
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className={`${TC_TD} ${TC_MONEY} text-right`}>
                         {formatManwon(item.depositManwon)}
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className={`${TC_TD} w-[4.5rem] text-right`}>
                         {formatManwon(item.monthlyRentManwon)}
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className={`${TC_TD} ${TC_MONEY} text-right`}>
                         {formatManwon(item.dealAmountManwon)}
                       </td>
-                      <td className="px-2 py-1.5">{item.dealDate || "현재"}</td>
-                      <td className="px-2 py-1.5">
+                      <td className={`${TC_TD} w-16`}>{item.dealDate || "현재"}</td>
+                      <td className={`${TC_TD} w-20`}>
                         {item.monthlyRentManwon != null && item.monthlyRentManwon > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             <button
@@ -2995,9 +3229,10 @@ function buildRentSettingFromMarketListing(
   }
 
   const roomType = rentSettingRoomTypeFromMarket(listing.roomType);
+  const areaSqm = listing.areaSqm;
   const areaPyeong =
-    listing.areaSqm != null
-      ? Math.round((listing.areaSqm / PYEONG_TO_SQM) * 10) / 10
+    areaSqm != null
+      ? Math.round((areaSqm / PYEONG_TO_SQM) * 10) / 10
       : null;
   const note = [
     "주변시세 선택",
@@ -3010,6 +3245,7 @@ function buildRentSettingFromMarketListing(
     roomType,
     deposit,
     monthlyRent,
+    areaSqm,
     areaPyeong,
     note,
   };
@@ -3169,6 +3405,7 @@ function findReusableMarketCases(allCases: AuctionCase[], targetCase: AuctionCas
       (item) =>
         item.id !== targetCase.id &&
         item.nearbyMarketAnalysis != null &&
+        (item.nearbyMarketAnalysis.molitCount ?? 0) > 0 &&
         (item.address.includes(gu) || item.nearbyMarketAnalysis.gu === gu),
     )
     .sort((a, b) => {
@@ -3204,27 +3441,55 @@ function similarSaleAverageForCase(listings: MarketListingItem[], caseData: Auct
   return averageManwon(base.slice(0, 15).map((item) => item.dealAmountManwon));
 }
 
+function buildNearbyMarketAnalysisFromListings(
+  listings: MarketListingItem[],
+  meta: {
+    city: string;
+    gu: string;
+    saleMonths?: number | null;
+    rentMonths?: number | null;
+    months?: number | null;
+  },
+  targetCase: AuctionCase,
+): NonNullable<AuctionCase["nearbyMarketAnalysis"]> {
+  const sorted = sortMarketListingsForCase(listings, targetCase);
+  return {
+    importedAt: new Date().toISOString(),
+    city: meta.city,
+    gu: caseGu(targetCase.address) || meta.gu,
+    dong: inferDong(targetCase.address) || "",
+    lat: null,
+    lng: null,
+    months: meta.months ?? MOLIT_RENT_MONTHS,
+    saleMonths: meta.saleMonths ?? MOLIT_SALE_MONTHS,
+    rentMonths: meta.rentMonths ?? MOLIT_RENT_MONTHS,
+    molitCount: sorted.filter((item) => item.source === "molit").length,
+    naverCount: sorted.filter((item) => item.source === "naver").length,
+    saleAvgMolitManwon: similarSaleAverageForCase(sorted, targetCase),
+    saleAvgNaverManwon: null,
+    roomSummaries: buildRoomSummariesFromListings(sorted),
+    listings: sorted,
+    geminiInsight: null,
+  };
+}
+
 function buildReusedNearbyMarketAnalysis(
   sourceCase: AuctionCase,
   targetCase: AuctionCase,
 ): NonNullable<AuctionCase["nearbyMarketAnalysis"]> | null {
   const source = sourceCase.nearbyMarketAnalysis;
   if (!source) return null;
-  const listings = sortMarketListingsForCase(source.listings, targetCase);
-  return {
-    ...source,
-    importedAt: new Date().toISOString(),
-    gu: caseGu(targetCase.address) || source.gu,
-    dong: inferDong(targetCase.address) || source.dong,
-    lat: null,
-    lng: null,
-    molitCount: listings.filter((item) => item.source === "molit").length,
-    naverCount: listings.filter((item) => item.source === "naver").length,
-    saleAvgMolitManwon: similarSaleAverageForCase(listings, targetCase),
-    roomSummaries: buildRoomSummariesFromListings(listings),
-    listings,
-    geminiInsight: null,
-  };
+  return buildNearbyMarketAnalysisFromListings(
+    source.listings,
+    {
+      city: source.city,
+      gu: source.gu,
+      saleMonths: source.saleMonths,
+      rentMonths: source.rentMonths,
+      months: source.months,
+    },
+    targetCase,
+  );
 }
 
 function averageManwon(values: Array<number | null>): number | null {
@@ -3516,13 +3781,21 @@ function NearbyMarketMap({
 }
 
 function SourceDocumentsPanel({
+  caseId,
+  caseNumber,
   documents,
+  listThumbnail,
   onAddDocument,
+  onListThumbnailChange,
 }: {
+  caseId: string;
+  caseNumber: string;
   documents: CaseSourceDocument[];
+  listThumbnail: AuctionCase["listThumbnail"];
   onAddDocument: (document: CaseSourceDocument) => void;
+  onListThumbnailChange: (next: AuctionCase["listThumbnail"]) => void;
 }) {
-  const [kind, setKind] = useState<CaseSourceDocumentKind>("building-ledger");
+  const [kind, setKind] = useState<CaseSourceDocumentKind>("daejangauction-pdf");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -3548,23 +3821,33 @@ function SourceDocumentsPanel({
       if (!res.ok || !data.ok) {
         throw new Error(data.ok ? "PDF 파싱에 실패했습니다." : data.error);
       }
-      const document = buildPdfSourceDocument({
+      const extractedCaseNumber =
+        data.extracted?.caseNumber != null
+          ? String(data.extracted.caseNumber)
+          : null;
+      const document = await registerSourcePdfUpload({
+        caseId,
+        caseNumber,
+        extractedCaseNumber,
+        kind,
+        file: selectedFile,
         meta: data.meta,
         rawText: data.rawText,
         structuredJson: data.structuredJson,
-        kind,
       });
       onAddDocument(document);
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      setMessage("문서를 추가했습니다. 원문 텍스트와 구조화 JSON이 함께 저장됩니다.");
+      setMessage(
+        `문서를 추가했습니다. 원본 PDF는 ${document.pdfBlobRef ?? "저장 경로 미상"} 에 보관됩니다.`,
+      );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "문서 등록에 실패했습니다.");
     } finally {
       uploadingRef.current = false;
       setBusy(false);
     }
-  }, [kind, onAddDocument]);
+  }, [caseId, caseNumber, kind, onAddDocument]);
 
   const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -3588,6 +3871,12 @@ function SourceDocumentsPanel({
           파서가 개선되면 이 원문으로 다시 분석할 수 있습니다.
         </p>
       </div>
+
+      <CaseListThumbnailEditor
+        caseId={caseId}
+        thumbnail={listThumbnail}
+        onChange={onListThumbnailChange}
+      />
 
       <form
         onSubmit={handleUpload}
@@ -3653,74 +3942,174 @@ function SourceDocumentsPanel({
           </p>
         )}
         <p className="text-xs text-neutral-500">
-          외부 DB 연동 시에도 원본 PDF 파일보다 추출 텍스트와 구조화 JSON을 우선
-          저장하면 동기화 payload가 작고 검색·재분석이 쉽습니다. 원본 파일은
-          별도 스토리지에 두고 URL만 보관하는 방식이 적합합니다.
+          원본 PDF는 브라우저 IndexedDB에{" "}
+          <span className="font-mono">{`{사건번호}/{사건번호}_{문서종류}.pdf`}</span>{" "}
+          형식으로 저장됩니다. 추출 텍스트·구조화 JSON과 함께 보관되어 파서
+          개선 후 재분석할 수 있습니다.
         </p>
       </form>
 
       {documents.length === 0 ? (
         <p className="rounded-lg bg-neutral-50 p-4 text-sm text-neutral-500 dark:bg-neutral-900">
-          저장된 PDF 원문이 없습니다. 새 PDF 등록부터 원문이 함께 저장됩니다.
+          저장된 PDF 원문이 없습니다. 새 PDF 등록부터 원본 파일이 함께 저장됩니다.
         </p>
       ) : (
-        <div className="space-y-3">
-          {documents.map((doc, index) => (
-            <article
-              key={doc.id}
-              className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium">
-                    {index + 1}. {doc.fileName || "(파일명 없음)"}
-                  </p>
-                  <p className="mt-1 text-xs text-neutral-500">
-                    {doc.kind} · 페이지 {doc.pageCount ?? "?"} ·{" "}
-                    {doc.fileSize != null
-                      ? `${(doc.fileSize / 1024 / 1024).toFixed(2)}MB`
-                      : "크기 미상"}{" "}
-                    · {doc.parserVersion}
-                  </p>
-                  <p className="mt-0.5 text-xs text-neutral-500">
-                    등록: {doc.importedAt}
-                  </p>
-                </div>
-                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-300">
-                  원문 {doc.extractedText.length.toLocaleString("ko-KR")}자
-                </span>
-              </div>
-
-              <StructuredBasicInfoSummary document={doc} />
-
-              <details className="mt-3">
-                <summary className="cursor-pointer text-sm font-medium">
-                  원문 텍스트 보기
-                </summary>
-                <pre className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
-                  {doc.extractedText.trim() || "(텍스트가 비어있습니다)"}
-                </pre>
-              </details>
-
-              <details className="mt-3">
-                <summary className="cursor-pointer text-sm font-medium">
-                  구조화 JSON 보기
-                </summary>
-                <pre className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
-                  {doc.structuredJson
-                    ? JSON.stringify(doc.structuredJson, null, 2)
-                    : "(구조화 JSON이 없습니다)"}
-                </pre>
-              </details>
-            </article>
-          ))}
-        </div>
+        <SourceDocumentFolderList caseId={caseId} documents={documents} />
       )}
     </section>
   );
 }
 
+function SourceDocumentFolderList({
+  caseId,
+  documents,
+}: {
+  caseId: string;
+  documents: CaseSourceDocument[];
+}) {
+  const folders = useMemo(() => {
+    const map = new Map<string, CaseSourceDocument[]>();
+    for (const doc of documents) {
+      const folder =
+        doc.pdfBlobRef?.includes("/")
+          ? doc.pdfBlobRef.split("/")[0]!
+          : normalizeCaseNumber(
+              (doc.structuredJson as { auction_case?: { case_info?: { case_number?: string } } })
+                ?.auction_case?.case_info?.case_number ?? "",
+            ) || "원문";
+      const list = map.get(folder) ?? [];
+      list.push(doc);
+      map.set(folder, list);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, "ko"));
+  }, [documents]);
+
+  return (
+    <div className="space-y-4">
+      {folders.map(([folder, docs]) => (
+        <div
+          key={folder}
+          className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
+        >
+          <p className="font-mono text-sm font-medium">{folder}/</p>
+          <div className="mt-2 space-y-3">
+            {docs.map((doc, index) => (
+              <SourceDocumentCard
+                key={doc.id}
+                caseId={caseId}
+                doc={doc}
+                index={index}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SourceDocumentCard({
+  caseId,
+  doc,
+  index,
+}: {
+  caseId: string;
+  doc: CaseSourceDocument;
+  index: number;
+}) {
+  const storedName =
+    doc.storedFileName ??
+    doc.pdfBlobRef?.split("/").pop() ??
+    doc.fileName;
+  const originalName = doc.originalFileName ?? doc.fileName;
+
+  return (
+    <article className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">
+            {index + 1}. {storedName || "(파일명 없음)"}
+          </p>
+          {originalName !== storedName && (
+            <p className="mt-0.5 text-xs text-neutral-500">
+              업로드: {originalName}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-neutral-500">
+            {sourceDocumentKindLabel(doc.kind)} · 페이지 {doc.pageCount ?? "?"} ·{" "}
+            {doc.fileSize != null
+              ? `${(doc.fileSize / 1024 / 1024).toFixed(2)}MB`
+              : "크기 미상"}{" "}
+            · {doc.parserVersion}
+          </p>
+          {doc.pdfBlobRef && (
+            <p className="mt-0.5 font-mono text-xs text-neutral-500">
+              {doc.pdfBlobRef}
+            </p>
+          )}
+          <p className="mt-0.5 text-xs text-neutral-500">
+            등록: {doc.importedAt}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {doc.pdfBlobRef && (
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                onClick={() => {
+                  void openSourcePdfInNewTab(caseId, doc.pdfBlobRef!);
+                }}
+              >
+                PDF 보기
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+                onClick={async () => {
+                  const blob = await getSourcePdfBlob(caseId, doc.pdfBlobRef!);
+                  if (blob) downloadBlobAsFile(blob, storedName || "document.pdf");
+                }}
+              >
+                다운로드
+              </button>
+            </>
+          )}
+          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-300">
+            원문 {doc.extractedText.length.toLocaleString("ko-KR")}자
+          </span>
+        </div>
+      </div>
+
+      <StructuredBasicInfoSummary document={doc} />
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          원문 텍스트 보기
+        </summary>
+        <pre className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
+          {doc.extractedText.trim() || "(텍스트가 비어있습니다)"}
+        </pre>
+      </details>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          구조화 JSON 보기
+        </summary>
+        <pre className="mt-2 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-lg bg-neutral-100 p-3 text-xs dark:bg-neutral-900">
+          {doc.structuredJson
+            ? JSON.stringify(doc.structuredJson, null, 2)
+            : "(구조화 JSON이 없습니다)"}
+        </pre>
+      </details>
+    </article>
+  );
+}
+
 function TenantAnalysisPanel({
+  caseId,
+  caseNumber,
+  compact = false,
   documents,
   onDocumentsChange,
   noDividendRequestGuide,
@@ -3729,7 +4118,14 @@ function TenantAnalysisPanel({
   fallbackMinimumPrice,
   fallbackExpectedBidPrice,
   fallbackAppraisalPrice,
+  tenantRecords,
+  onExpectedBidPriceChange,
+  onTenantRecordsChange,
+  onTenantSpecApplied,
 }: {
+  caseId: string;
+  caseNumber: string;
+  compact?: boolean;
   documents: CaseSourceDocument[];
   onDocumentsChange: (documents: CaseSourceDocument[]) => void;
   noDividendRequestGuide: string;
@@ -3738,16 +4134,26 @@ function TenantAnalysisPanel({
   fallbackMinimumPrice: number | null;
   fallbackExpectedBidPrice: number | null;
   fallbackAppraisalPrice: number | null;
+  tenantRecords: AuctionCase["tenantRecords"];
+  onExpectedBidPriceChange: (price: number | null) => void;
+  onTenantRecordsChange: (records: AuctionCase["tenantRecords"]) => void;
+  onTenantSpecApplied?: () => void;
 }) {
-  const [tenantViewMode, setTenantViewMode] = useState<"card" | "row">("card");
+  const [expandedTenantKey, setExpandedTenantKey] = useState<string | null>(null);
   const [guideEditing, setGuideEditing] = useState(false);
   const [guideDraft, setGuideDraft] = useState(noDividendRequestGuide);
   const [specFile, setSpecFile] = useState<File | null>(null);
   const [specBusy, setSpecBusy] = useState(false);
   const [specMessage, setSpecMessage] = useState<string | null>(null);
+  const [dividendFile, setDividendFile] = useState<File | null>(null);
+  const [dividendBusy, setDividendBusy] = useState(false);
+  const [dividendMessage, setDividendMessage] = useState<string | null>(null);
   const specFileInputRef = useRef<HTMLInputElement | null>(null);
+  const dividendFileInputRef = useRef<HTMLInputElement | null>(null);
   const specAutoUploadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dividendAutoUploadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const specUploadingRef = useRef(false);
+  const dividendUploadingRef = useRef(false);
   const tenantDocIndex = documents.findIndex((doc) => getDocumentAnalysisPayload(doc).tenants);
   const tenantPayload =
     tenantDocIndex >= 0 ? getDocumentAnalysisPayload(documents[tenantDocIndex]!) : undefined;
@@ -3791,7 +4197,9 @@ function TenantAnalysisPanel({
     .find((schedule) => schedule != null);
   const currentSchedule = arrayRecords(saleSchedule?.schedules)
     .find((schedule) => schedule.is_current === true) ?? arrayRecords(saleSchedule?.schedules)[0];
+  const expectedDividend = getExpectedDividendFromDocuments(documents);
   const distributionBasePrice =
+    expectedDividend?.bid_price ??
     fallbackExpectedBidPrice ??
     (fallbackAppraisalPrice != null ? Math.round(fallbackAppraisalPrice * 0.7) : null) ??
     numberValue(currentSchedule?.minimum_price) ??
@@ -3807,7 +4215,23 @@ function TenantAnalysisPanel({
       ) || fallbackAddress,
     keyDateBase: textValue(tenants?.key_date_base),
   });
-  const tenantDisplayRows = buildTenantDisplayRows(tenantRows, distributionRows);
+  const tenantDisplayRows = buildTenantDisplayRows(tenantRows, distributionRows).map(
+    (row) => {
+      const computed: TenantDistributionView = {
+        ...row.distribution,
+        source: "computed",
+      };
+      return {
+        ...row,
+        distribution: resolveTenantDistributionView({
+          tenant: row.tenant,
+          computed,
+          pdfRows: expectedDividend?.rows ?? [],
+          bidPrice: expectedDividend?.bid_price ?? distributionBasePrice,
+        }),
+      };
+    },
+  );
   const uploadSaleSpecificationFile = useCallback(async (selectedFile: File) => {
     if (specUploadingRef.current) return;
     specUploadingRef.current = true;
@@ -3825,19 +4249,24 @@ function TenantAnalysisPanel({
       if (!res.ok || !data.ok) {
         throw new Error(data.ok ? "PDF 파싱에 실패했습니다." : data.error);
       }
-      const document = buildPdfSourceDocument({
+      const document = await registerSourcePdfUpload({
+        caseId,
+        caseNumber,
+        extractedCaseNumber: null,
+        kind: "tenant-report",
+        file: selectedFile,
         meta: data.meta,
         rawText: data.rawText,
         structuredJson: data.structuredJson,
-        kind: "tenant-report",
       });
       normalizeTenantDocumentRows(document);
       const nextDocuments = mergeTenantReportDocument(documents, document);
       onDocumentsChange(nextDocuments);
+      onTenantSpecApplied?.();
       setSpecFile(null);
       if (specFileInputRef.current) specFileInputRef.current.value = "";
       setSpecMessage(
-        "매각물건명세서를 추가하고 호실별 임차인 현황에 빈 값을 보강했습니다.",
+        "매각물건명세서 기준으로 호실별 임차인 현황을 갱신했습니다. 잘못된 경우 명세서를 다시 등록하면 리셋됩니다.",
       );
     } catch (err) {
       setSpecMessage(
@@ -3847,7 +4276,95 @@ function TenantAnalysisPanel({
       specUploadingRef.current = false;
       setSpecBusy(false);
     }
-  }, [documents, onDocumentsChange]);
+  }, [caseId, caseNumber, documents, onDocumentsChange, onTenantSpecApplied]);
+  const uploadExpectedDividendFile = useCallback(
+    async (selectedFile: File) => {
+      if (dividendUploadingRef.current) return;
+      dividendUploadingRef.current = true;
+      setDividendBusy(true);
+      setDividendMessage(null);
+      try {
+        const form = new FormData();
+        form.append("file", selectedFile);
+        form.append("kind", "expected-dividend");
+        const res = await fetch("/api/pdf-to-json", {
+          method: "POST",
+          body: form,
+        });
+        const data = (await res.json()) as PdfToJsonOk | PdfToJsonError;
+        if (!res.ok || !data.ok) {
+          throw new Error(data.ok ? "PDF 파싱에 실패했습니다." : data.error);
+        }
+        const baseDocument = await registerSourcePdfUpload({
+          caseId,
+          caseNumber,
+          extractedCaseNumber: null,
+          kind: "expected-dividend",
+          file: selectedFile,
+          meta: data.meta,
+          rawText: data.rawText,
+          structuredJson: data.structuredJson,
+        });
+        const document: CaseSourceDocument = {
+          ...baseDocument,
+          parserVersion: EXPECTED_DIVIDEND_PARSER_VERSION,
+        };
+        const parsed = getExpectedDividendFromDocuments([document]);
+        if (!parsed?.rows.length) {
+          throw new Error("예상배당표에서 임차인 배당 내역을 찾지 못했습니다.");
+        }
+        const nextDocuments = [
+          document,
+          ...documents.filter((doc) => doc.kind !== "expected-dividend"),
+        ];
+        onDocumentsChange(nextDocuments);
+        if (parsed.bid_price != null) {
+          onExpectedBidPriceChange(parsed.bid_price);
+        }
+        onTenantRecordsChange(
+          syncTenantRecordsFromExpectedDividend(
+            tenantRecords,
+            parsed,
+            tenantRows,
+          ),
+        );
+        setDividendFile(null);
+        if (dividendFileInputRef.current) dividendFileInputRef.current.value = "";
+        setDividendMessage(
+          `예상배당표를 반영했습니다. 임차인 ${parsed.rows.length}명 · 입찰가 ${parsed.bid_price != null ? formatWonWithUnit(parsed.bid_price) : "미확인"}`,
+        );
+      } catch (err) {
+        setDividendMessage(
+          err instanceof Error ? err.message : "예상배당표 반영에 실패했습니다.",
+        );
+      } finally {
+        dividendUploadingRef.current = false;
+        setDividendBusy(false);
+      }
+    },
+    [
+      caseId,
+      caseNumber,
+      documents,
+      onDocumentsChange,
+      onExpectedBidPriceChange,
+      onTenantRecordsChange,
+      tenantRecords,
+      tenantRows,
+    ],
+  );
+  const uploadExpectedDividend = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (dividendAutoUploadTimerRef.current) {
+      clearTimeout(dividendAutoUploadTimerRef.current);
+      dividendAutoUploadTimerRef.current = null;
+    }
+    if (!dividendFile) {
+      setDividendMessage("예상배당표 PDF를 선택해 주세요.");
+      return;
+    }
+    await uploadExpectedDividendFile(dividendFile);
+  };
   const uploadSaleSpecification = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (specAutoUploadTimerRef.current) {
@@ -3899,7 +4416,9 @@ function TenantAnalysisPanel({
     const list = Array.isArray(tenantRoot.list) ? tenantRoot.list : [];
     tenantRoot.list = list;
     mutator(list, tenantRoot);
-    normalizeTenantRentRows(list);
+    const sortedRows = sortTenantRowsByUnit(arrayRecords(list));
+    tenantRoot.list = sortedRows;
+    normalizeTenantRentRows(sortedRows);
     refreshTenantTotals(tenantRoot);
     onDocumentsChange(nextDocs);
   };
@@ -3913,8 +4432,50 @@ function TenantAnalysisPanel({
     return (
       <section className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium">세입자 분석</h3>
+          <h3 className="font-medium">{compact ? "세입자" : "세입자 분석"}</h3>
           <div className="flex flex-wrap items-center gap-2">
+            {!compact && (
+              <form
+                onSubmit={uploadExpectedDividend}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <label className="cursor-pointer rounded-lg border border-sky-300 px-3 py-1.5 text-sm font-medium text-sky-900 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-200 dark:hover:bg-sky-950/30">
+                  예상배당표 선택
+                  <input
+                    ref={dividendFileInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const selectedFile = e.target.files?.[0] ?? null;
+                      setDividendFile(selectedFile);
+                      if (dividendAutoUploadTimerRef.current) {
+                        clearTimeout(dividendAutoUploadTimerRef.current);
+                        dividendAutoUploadTimerRef.current = null;
+                      }
+                      setDividendMessage(
+                        selectedFile
+                          ? "예상배당표 선택됨: 1초 후 자동으로 반영합니다."
+                          : null,
+                      );
+                      if (selectedFile) {
+                        dividendAutoUploadTimerRef.current = setTimeout(() => {
+                          dividendAutoUploadTimerRef.current = null;
+                          void uploadExpectedDividendFile(selectedFile);
+                        }, 1000);
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={dividendBusy}
+                  className="rounded-lg bg-sky-800 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-sky-200 dark:text-sky-950"
+                >
+                  {dividendBusy ? "반영 중..." : "배당표 반영"}
+                </button>
+              </form>
+            )}
             <form
               onSubmit={uploadSaleSpecification}
               className="flex flex-wrap items-center gap-2"
@@ -3935,7 +4496,7 @@ function TenantAnalysisPanel({
                     }
                     setSpecMessage(
                       selectedFile
-                        ? "매각물건명세서 선택됨: 1초 후 자동으로 보강합니다."
+                        ? "매각물건명세서 선택됨: 1초 후 자동으로 반영합니다."
                         : null,
                     );
                     if (selectedFile) {
@@ -3952,7 +4513,7 @@ function TenantAnalysisPanel({
                 disabled={specBusy}
                 className="rounded-lg bg-amber-900 px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
               >
-                {specBusy ? "보강 중..." : "명세서로 보강"}
+                {specBusy ? "반영 중..." : "명세서 반영"}
               </button>
             </form>
             <button
@@ -3972,75 +4533,159 @@ function TenantAnalysisPanel({
             {specMessage}
           </p>
         )}
+        {!compact && dividendMessage && (
+          <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+            {dividendMessage}
+          </p>
+        )}
         <p className="rounded-lg bg-neutral-50 p-4 text-sm text-neutral-500 dark:bg-neutral-900">
-          저장된 구조화 JSON에서 임차인 현황이나 등기부 권리 목록을 찾지
-          못했습니다. 옥션원 스키마의 <code>tenants</code>,{" "}
-          <code>building_registry</code>, <code>land_registry</code> 항목이
-          저장되면 이 화면에 자동으로 표시됩니다. 정보가 불분명하면 먼저
-          수동 임차인 항목을 추가해 기록할 수 있습니다.
+          {compact
+            ? "등록된 세입자 정보가 없습니다. 매각물건명세서를 등록하거나 임차인 항목을 추가하세요."
+            : (
+              <>
+                저장된 구조화 JSON에서 임차인 현황이나 등기부 권리 목록을 찾지
+                못했습니다. 옥션원 스키마의 <code>tenants</code>,{" "}
+                <code>building_registry</code>, <code>land_registry</code> 항목이
+                저장되면 이 화면에 자동으로 표시됩니다. 정보가 불분명하면 먼저
+                수동 임차인 항목을 추가해 기록할 수 있습니다.
+              </>
+            )}
         </p>
       </section>
     );
   }
 
   return (
-    <section className="space-y-5 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
-      <div>
-        <h3 className="font-medium">세입자 분석</h3>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          PDF 구조화 데이터의 임차인 현황과 건물·토지 등기부 권리를 함께
-          봅니다. 대항력 착시, 배당요구 누락, 임차권 등기 여부를 우선
-          확인하세요.
-        </p>
-        <p className="mt-1 text-xs text-neutral-500">
-          배당 기준금액:{" "}
-          <strong className="tabular-nums">
-            {distributionBasePrice != null
-              ? formatWonWithUnit(distributionBasePrice)
-              : "계산불가"}
-          </strong>
-          {" "}· 예상 낙찰가가 있으면 우선 사용하고, 없으면 감정가 70%를 적용합니다.
-        </p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricBox label="임차인 수" value={textValue(tenants?.total_count)} />
-        <MetricBox label="총 보증금" value={wonValue(tenants?.total_deposit)} />
-        <MetricBox label="총 월세" value={wonValue(tenants?.total_monthly_rent)} />
-        <MetricBox label="배당요구 종기" value={textValue(tenants?.bid_deadline)} />
-      </div>
-
-      {depositMortgageComment && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          <p className="font-medium">보증금+근저당 검토</p>
-          <p className="mt-1">{depositMortgageComment}</p>
-          <p className="mt-1 text-xs tabular-nums">
-            감정가 {wonValue(appraisalPrice)} · 총 보증금 {wonValue(totalDeposit)} · 근저당 합계 {wonValue(mortgageAmount)}
-          </p>
+    <section
+      className={`rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950 ${
+        compact ? "space-y-2 p-3" : "space-y-5 p-4"
+      }`}
+    >
+      {compact ? (
+        <h3 className="text-sm font-medium">세입자</h3>
+      ) : (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h3 className="font-medium">세입자 · 임차인 구조화</h3>
+            <p className="mt-0.5 text-[11px] text-neutral-500">
+              녹/노/빨 = 배당 상태 · 명세서 우선 · 날짜는 행 「상세」
+            </p>
+          </div>
+          <label className="text-xs font-medium text-neutral-500">
+            배당 기준 입찰가
+            <input
+              inputMode="numeric"
+              className="mt-1 block w-40 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
+              value={
+                distributionBasePrice != null
+                  ? formatWonDigits(distributionBasePrice)
+                  : ""
+              }
+              onChange={(e) =>
+                onExpectedBidPriceChange(parseWonInput(e.target.value))
+              }
+              placeholder="예상 낙찰가"
+            />
+          </label>
         </div>
       )}
+      {!compact && dividendMessage && (
+        <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+          {dividendMessage}
+        </p>
+      )}
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <TenantRightsSummaryCard
-          keyDate={textValue(tenants?.key_date_base)}
-          keyRight={textValue(tenants?.key_right_type)}
-          buildingClaim={wonValue(buildingRegistry?.total_claim_amount)}
-          landClaim={wonValue(landRegistry?.total_claim_amount)}
-        />
-        <TenantStatusSummaryCard
-          floor1={statusSummary?.floor_1}
-          floor2={statusSummary?.floor_2}
-          floor3={statusSummary?.floor_3}
-          floor4={statusSummary?.floor_4}
-          rooftop={statusSummary?.rooftop}
-          notes={statusSummary?.special_notes}
-        />
-      </div>
+      {!compact && (
+      <details className="rounded-lg border border-neutral-200 dark:border-neutral-800">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400">
+          요약·권리·등기 ({textValue(tenants?.total_count) || "0"}명 · 보증금{" "}
+          {wonValue(tenants?.total_deposit)} · 월세 {wonValue(tenants?.total_monthly_rent)})
+        </summary>
+        <div className="space-y-3 border-t border-neutral-100 px-3 py-3 dark:border-neutral-900">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricBox label="임차인 수" value={textValue(tenants?.total_count)} />
+            <MetricBox label="총 보증금" value={wonValue(tenants?.total_deposit)} />
+            <MetricBox label="총 월세" value={wonValue(tenants?.total_monthly_rent)} />
+            <MetricBox label="배당요구 종기" value={textValue(tenants?.bid_deadline)} />
+          </div>
+          {depositMortgageComment && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-medium">보증금+근저당 검토</p>
+              <p className="mt-1">{depositMortgageComment}</p>
+              <p className="mt-1 text-xs tabular-nums">
+                감정가 {wonValue(appraisalPrice)} · 총 보증금 {wonValue(totalDeposit)} · 근저당 합계{" "}
+                {wonValue(mortgageAmount)}
+              </p>
+            </div>
+          )}
+          <div className="grid gap-3 lg:grid-cols-2">
+            <TenantRightsSummaryCard
+              keyDate={textValue(tenants?.key_date_base)}
+              keyRight={textValue(tenants?.key_right_type)}
+              buildingClaim={wonValue(buildingRegistry?.total_claim_amount)}
+              landClaim={wonValue(landRegistry?.total_claim_amount)}
+            />
+            <TenantStatusSummaryCard
+              floor1={statusSummary?.floor_1}
+              floor2={statusSummary?.floor_2}
+              floor3={statusSummary?.floor_3}
+              floor4={statusSummary?.floor_4}
+              rooftop={statusSummary?.rooftop}
+              notes={statusSummary?.special_notes}
+            />
+          </div>
+        </div>
+      </details>
+      )}
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="text-sm font-medium">호실별 임차인 현황</h4>
+          <h4 className={`font-medium ${compact ? "text-xs" : "text-sm"}`}>
+            {compact ? "호실별 현황" : "호실별 임차인 현황"}
+          </h4>
           <div className="flex flex-wrap items-center gap-2">
+            {!compact && (
+              <form
+                onSubmit={uploadExpectedDividend}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <label className="cursor-pointer rounded-lg border border-sky-300 px-2.5 py-1 text-xs font-medium text-sky-900 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-200 dark:hover:bg-sky-950/30">
+                  예상배당표 선택
+                  <input
+                    ref={dividendFileInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const selectedFile = e.target.files?.[0] ?? null;
+                      setDividendFile(selectedFile);
+                      if (dividendAutoUploadTimerRef.current) {
+                        clearTimeout(dividendAutoUploadTimerRef.current);
+                        dividendAutoUploadTimerRef.current = null;
+                      }
+                      setDividendMessage(
+                        selectedFile
+                          ? "예상배당표 선택됨: 1초 후 자동으로 반영합니다."
+                          : null,
+                      );
+                      if (selectedFile) {
+                        dividendAutoUploadTimerRef.current = setTimeout(() => {
+                          dividendAutoUploadTimerRef.current = null;
+                          void uploadExpectedDividendFile(selectedFile);
+                        }, 1000);
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={dividendBusy}
+                  className="rounded-lg bg-sky-800 px-2.5 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-sky-200 dark:text-sky-950"
+                >
+                  {dividendBusy ? "반영 중..." : "배당표 반영"}
+                </button>
+              </form>
+            )}
             <form
               onSubmit={uploadSaleSpecification}
               className="flex flex-wrap items-center gap-2"
@@ -4061,7 +4706,7 @@ function TenantAnalysisPanel({
                     }
                     setSpecMessage(
                       selectedFile
-                        ? "매각물건명세서 선택됨: 1초 후 자동으로 보강합니다."
+                        ? "매각물건명세서 선택됨: 1초 후 자동으로 반영합니다."
                         : null,
                     );
                     if (selectedFile) {
@@ -4083,7 +4728,7 @@ function TenantAnalysisPanel({
                 disabled={specBusy}
                 className="rounded-lg bg-amber-900 px-2.5 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-200 dark:text-amber-950"
               >
-                {specBusy ? "보강 중..." : "명세서로 보강"}
+                {specBusy ? "반영 중..." : "명세서 반영"}
               </button>
             </form>
             <button
@@ -4093,456 +4738,48 @@ function TenantAnalysisPanel({
             >
               임차인 항목 추가
             </button>
-            <div className="inline-flex rounded-lg border border-neutral-200 p-0.5 text-xs dark:border-neutral-800">
-              <button
-                type="button"
-                onClick={() => setTenantViewMode("card")}
-                className={`rounded-md px-2.5 py-1 ${
-                  tenantViewMode === "card"
-                    ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                    : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
-                }`}
-              >
-                기본
-              </button>
-            <button
-              type="button"
-              onClick={() => setTenantViewMode("row")}
-              className={`rounded-md px-2.5 py-1 ${
-                tenantViewMode === "row"
-                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                  : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
-              }`}
-            >
-              1줄 보기
-            </button>
-            </div>
           </div>
         </div>
+        {!compact && (
+          <p className="text-[11px] text-neutral-500">
+            핵심 항목은 한 표에 표시합니다. 전입·확정·배당일과 메모는 각 행의 「상세」에서
+            편집하세요.
+          </p>
+        )}
         {specMessage && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
             {specMessage}
           </p>
         )}
-        {tenantRows.length === 0 ? (
-          <p className="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-500 dark:bg-neutral-900">
-            임차인 목록이 없습니다.
-          </p>
-        ) : tenantViewMode === "row" ? (
-          <div className="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800">
-            <table className="w-full table-fixed text-left text-xs">
-              <colgroup>
-                <col className="w-[6%]" />
-                <col className="w-[10%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[7%]" />
-                <col className="w-[15%]" />
-                <col className="w-[5%]" />
-                <col className="w-[5%]" />
-              </colgroup>
-              <thead className="bg-neutral-50 text-neutral-500 dark:bg-neutral-900">
-                <tr>
-                  <th className="px-1.5 py-2">호실</th>
-                  <th className="px-1.5 py-2">입주자</th>
-                  <th className="px-1.5 py-2">임장점유</th>
-                  <th className="px-1.5 py-2">룸형식</th>
-                  <th className="px-1.5 py-2">방크기</th>
-                  <th className="px-1.5 py-2">전입</th>
-                  <th className="px-1.5 py-2">확정일자</th>
-                  <th className="px-1.5 py-2">배당요구</th>
-                  <th className="px-1.5 py-2">보증금</th>
-                  <th className="px-1.5 py-2">월세</th>
-                  <th className="px-1.5 py-2">배당</th>
-                  <th className="px-1.5 py-2">대항력</th>
-                  <th className="px-1.5 py-2">임차권</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenantDisplayRows.map(({ tenant, originalIndex, distribution }) => {
-                  const noDividendRequest = !textValue(tenant.dividend_request_date);
-                  const roomType = textValue(tenant.room_type);
-                  const deposit = numberValue(tenant.deposit);
-                  const monthlyRent = numberValue(tenant.monthly_rent);
-                  const tenantTone = isHousingCorporationTenant(textValue(tenant.name))
-                    ? "success"
-                    : noDividendRequest
-                      ? "risk"
-                      : undefined;
-                  const oneRoomLowDeposit =
-                    /원룸/.test(roomType) && deposit != null && deposit < 50_000_000;
-                  const rowKey = `row-${textValue(tenant.unit) || "unit"}-${originalIndex}`;
-                  const notePlaceholder =
-                    joinText([
-                      tenant.business_name,
-                      tenant.converted_deposit != null
-                        ? `환산 ${wonValue(tenant.converted_deposit)}`
-                        : "",
-                    ]) || "기타 메모를 입력하세요";
-                  return (
-                    <Fragment key={rowKey}>
-                    <tr className="border-t border-neutral-100 dark:border-neutral-900">
-                      <td
-                        className={`px-2 py-2 font-medium ${
-                          noDividendRequest
-                            ? "text-rose-700 dark:text-rose-400"
-                            : ""
-                        }`}
-                      >
-                        {textValue(tenant.unit) || "-"}
-                        <button
-                          type="button"
-                          onClick={() => deleteTenantRow(originalIndex)}
-                          className="mt-1 block text-[11px] font-normal text-neutral-400 underline hover:text-rose-600"
-                        >
-                          삭제
-                        </button>
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={textValue(tenant.name)}
-                          onChange={(value) => updateTenantField(originalIndex, "name", value)}
-                          placeholder="입주자"
-                          tone={tenantTone}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <select
-                          className="w-full min-w-0 rounded border border-neutral-200 px-2 py-1 text-xs dark:border-neutral-800 dark:bg-neutral-900"
-                          value={fieldOccupancyValue(tenant.field_occupancy_status)}
-                          onChange={(e) =>
-                            updateTenantField(
-                              originalIndex,
-                              "field_occupancy_status",
-                              e.target.value,
-                            )
-                          }
-                        >
-                          {FIELD_OCCUPANCY_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2">
-                        <select
-                        className="w-full min-w-0 rounded border border-neutral-200 px-2 py-1 dark:border-neutral-800 dark:bg-neutral-900"
-                          value={roomType}
-                          onChange={(e) =>
-                            updateTenantField(originalIndex, "room_type", e.target.value)
-                          }
-                        >
-                          {TENANT_ROOM_TYPE_OPTIONS.map((option) => (
-                            <option key={option || "empty"} value={option}>
-                              {option || "미지정"}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={numberValue(tenant.area_sqm) != null ? String(numberValue(tenant.area_sqm)) : ""}
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "area_sqm", parseAreaSqmInputToNumber(value))
-                          }
-                          placeholder="㎡"
-                          inputMode="decimal"
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={
-                            textValue(tenant.move_in_date) ||
-                            textValue(tenant.business_registration_date)
-                          }
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "move_in_date", value || null)
-                          }
-                          placeholder="전입일"
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={textValue(tenant.confirmed_date)}
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "confirmed_date", value || null)
-                          }
-                          placeholder="확정"
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={textValue(tenant.dividend_request_date)}
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "dividend_request_date", value || null)
-                          }
-                          placeholder="없음"
-                          tone={noDividendRequest ? "risk" : undefined}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={deposit != null ? formatWonDigits(deposit) : ""}
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "deposit", parseWonInput(value))
-                          }
-                          placeholder="보증금"
-                          inputMode="numeric"
-                          tone={oneRoomLowDeposit ? "risk" : undefined}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <TenantInlineInput
-                          value={monthlyRent != null ? formatWonDigits(monthlyRent) : ""}
-                          onChange={(value) =>
-                            updateTenantField(originalIndex, "monthly_rent", parseWonInput(value))
-                          }
-                          placeholder="월세"
-                          inputMode="numeric"
-                          tone={
-                            monthlyRent != null && monthlyRent < 400_000
-                              ? "risk"
-                              : undefined
-                          }
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <DistributionBadge distribution={distribution} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <RiskFlag value={tenant.has_opposing_power} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <RiskFlag value={tenant.lien_registered} />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-neutral-100 bg-neutral-50/60 dark:border-neutral-900 dark:bg-neutral-900/30">
-                      <td colSpan={13} className="px-2 py-2">
-                        <div className="grid gap-1 sm:grid-cols-[64px_1fr] sm:items-start">
-                          <span className="pt-1 text-xs font-medium text-neutral-500">
-                            기타
-                          </span>
-                          <textarea
-                            className="min-h-10 w-full resize-y rounded border border-neutral-200 bg-white px-2 py-1.5 text-xs text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-200"
-                            value={textValue(tenant.notes)}
-                            onChange={(e) =>
-                              updateTenantField(originalIndex, "notes", e.target.value || null)
-                            }
-                            placeholder={notePlaceholder}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {tenantDisplayRows.map(({ tenant, originalIndex, distribution }) => {
-              const noDividendRequest = !textValue(tenant.dividend_request_date);
-              const roomType = textValue(tenant.room_type);
-              const deposit = numberValue(tenant.deposit);
-              const monthlyRent = numberValue(tenant.monthly_rent);
-              const tenantTone = isHousingCorporationTenant(textValue(tenant.name))
-                ? "success"
-                : noDividendRequest
-                  ? "risk"
-                  : undefined;
-              const oneRoomLowDeposit =
-                /원룸/.test(roomType) && deposit != null && deposit < 50_000_000;
-              const tenantKey =
-                `${textValue(tenant.unit) || "unit"}-${originalIndex}` ||
-                `tenant-${originalIndex}`;
-
-              return (
-                <article
-                  key={tenantKey}
-                  className="rounded-xl border border-neutral-200 p-3 dark:border-neutral-800"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p
-                        className={`text-sm font-semibold ${
-                          noDividendRequest
-                            ? "text-rose-700 dark:text-rose-400"
-                            : ""
-                        }`}
-                      >
-                        {textValue(tenant.unit) || "호실 미상"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-neutral-500">
-                        {textValue(tenant.use) || "용도 미상"}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DistributionBadge distribution={distribution} />
-                      <span className="text-xs text-neutral-500">
-                        대항력 <RiskFlag value={tenant.has_opposing_power} />
-                      </span>
-                      <span className="text-xs text-neutral-500">
-                        임차권 <RiskFlag value={tenant.lien_registered} />
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => deleteTenantRow(originalIndex)}
-                        className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-500 hover:border-rose-300 hover:text-rose-600 dark:border-neutral-800"
-                      >
-                        삭제
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <TenantTextField
-                      label="입주자"
-                      value={textValue(tenant.name)}
-                      onChange={(value) => updateTenantField(originalIndex, "name", value)}
-                      placeholder="입주자"
-                      tone={tenantTone}
-                    />
-                    <label className="block text-xs font-medium text-neutral-500">
-                      임장 점유
-                      <select
-                        className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
-                        value={fieldOccupancyValue(tenant.field_occupancy_status)}
-                        onChange={(e) =>
-                          updateTenantField(
-                            originalIndex,
-                            "field_occupancy_status",
-                            e.target.value,
-                          )
-                        }
-                      >
-                        {FIELD_OCCUPANCY_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block text-xs font-medium text-neutral-500">
-                      룸형식
-                      <select
-                        className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
-                        value={roomType}
-                        onChange={(e) =>
-                          updateTenantField(originalIndex, "room_type", e.target.value)
-                        }
-                      >
-                        {TENANT_ROOM_TYPE_OPTIONS.map((option) => (
-                          <option key={option || "empty"} value={option}>
-                            {option || "미지정"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <TenantTextField
-                      label="전입/사업자"
-                      value={
-                        textValue(tenant.move_in_date) ||
-                        textValue(tenant.business_registration_date)
-                      }
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "move_in_date", value || null)
-                      }
-                      placeholder="YYYY-MM-DD"
-                    />
-                    <TenantTextField
-                      label="방크기(㎡)"
-                      value={numberValue(tenant.area_sqm) != null ? String(numberValue(tenant.area_sqm)) : ""}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "area_sqm", parseAreaSqmInputToNumber(value))
-                      }
-                      placeholder="예: 22"
-                      inputMode="decimal"
-                    />
-                    <TenantTextField
-                      label="확정일자"
-                      value={textValue(tenant.confirmed_date)}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "confirmed_date", value || null)
-                      }
-                      placeholder="YYYY-MM-DD"
-                    />
-                    <TenantTextField
-                      label="배당요구일"
-                      value={textValue(tenant.dividend_request_date)}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "dividend_request_date", value || null)
-                      }
-                      placeholder="없음"
-                      tone={noDividendRequest ? "risk" : undefined}
-                    />
-                    <TenantTextField
-                      label="보증금"
-                      value={deposit != null ? formatWonDigits(deposit) : ""}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "deposit", parseWonInput(value))
-                      }
-                      placeholder="보증금"
-                      inputMode="numeric"
-                      tone={oneRoomLowDeposit ? "risk" : undefined}
-                    />
-                    <TenantTextField
-                      label="월세"
-                      value={monthlyRent != null ? formatWonDigits(monthlyRent) : ""}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "monthly_rent", parseWonInput(value))
-                      }
-                      placeholder="월세"
-                      inputMode="numeric"
-                      tone={
-                        monthlyRent != null && monthlyRent < 400_000
-                          ? "risk"
-                          : undefined
-                      }
-                    />
-                  </div>
-                  <div className="mt-3 space-y-1">
-                    <TenantTextField
-                      label="기타"
-                      value={textValue(tenant.notes)}
-                      onChange={(value) =>
-                        updateTenantField(originalIndex, "notes", value || null)
-                      }
-                      placeholder="기타 메모"
-                    />
-                    {joinText([
-                      tenant.business_name,
-                      tenant.converted_deposit != null
-                        ? `환산 ${wonValue(tenant.converted_deposit)}`
-                        : "",
-                    ]) && (
-                      <p className="text-xs text-neutral-500">
-                        {joinText([
-                          tenant.business_name,
-                          tenant.converted_deposit != null
-                            ? `환산 ${wonValue(tenant.converted_deposit)}`
-                            : "",
-                        ])}
-                      </p>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
+        <TenantAnalysisCompactTable
+          rows={tenantDisplayRows}
+          expandedKey={expandedTenantKey}
+          onExpandedKeyChange={setExpandedTenantKey}
+          occupancyOptions={FIELD_OCCUPANCY_OPTIONS}
+          contractIntentOptions={FIELD_CONTRACT_INTENT_OPTIONS}
+          roomTypeOptions={TENANT_ROOM_TYPE_OPTIONS}
+          fieldOccupancyValue={fieldOccupancyValue}
+          fieldContractIntentValue={fieldContractIntentValue}
+          onUpdateField={updateTenantField}
+          onDeleteRow={deleteTenantRow}
+          parseAreaSqm={parseAreaSqmInputToNumber}
+          wonValue={wonValue}
+          tenantNameTone={tenantNameToneFromDistribution}
+          isHousingCorp={isHousingCorporationTenant}
+          DistributionBadge={DistributionBadge}
+          RiskFlag={RiskFlag}
+        />
       </div>
 
-      <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
+      {!compact && (
+      <details className="rounded-xl border border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+          배당요구 없는 임차인 기본 평가 (펼치기)
+        </summary>
+        <div className="border-t border-amber-200/60 p-3 dark:border-amber-900/40">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h4 className="text-sm font-medium">배당요구 없는 임차인 기본 평가</h4>
+            <h4 className="sr-only">배당요구 없는 임차인 기본 평가</h4>
             <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-100/80">
               저장한 문구는 모든 물건의 세입자 분석에서 기본값으로 사용됩니다.
             </p>
@@ -4603,24 +4840,33 @@ function TenantAnalysisPanel({
             {noDividendRequestGuide}
           </div>
         )}
-      </section>
-
-      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900/40">
-        <h4 className="text-sm font-medium">룸형식 가이드</h4>
-        <div className="mt-2 grid gap-2 text-xs text-neutral-600 dark:text-neutral-400 md:grid-cols-2">
-          <p><strong>원룸</strong>: 주방·침대가 한 공간. 월세 40만원 미만, 전세 5천만원 미만이면 수요 약함 주의.</p>
-          <p><strong>분리형 원룸</strong>: 중문/슬라이딩 도어로 주방·침실 분리.</p>
-          <p><strong>1.5룸</strong>: 거실 또는 소파 공간 + 방 1개 수준.</p>
-          <p><strong>투룸</strong>: 방 2개 또는 거실 겸 방 + 방 1개.</p>
-          <p><strong>정투룸</strong>: 방 2개 + 별도 거실.</p>
-          <p><strong>미니쓰리룸/쓰리룸</strong>: 방 3개 구성. 주변 아파트 공급과 경쟁 확인.</p>
-          <p><strong>주인세대</strong>: 쓰리룸급 구조에 자재·싱크대·인테리어가 고급인 세대.</p>
-          <p><strong>상가/점포</strong>: 사업자등록일, 환산보증금, 상가임대차 기준 별도 확인.</p>
         </div>
-      </div>
+      </details>
+      )}
 
-      <RegistryRightsTable title="건물등기부 권리" rights={buildingRights} />
-      <RegistryRightsTable title="토지등기부 권리" rights={landRights} />
+      {!compact && (
+      <details className="rounded-xl border border-neutral-200 dark:border-neutral-800">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400">
+          룸형식 가이드 · 등기부 권리 (펼치기)
+        </summary>
+        <div className="space-y-3 border-t border-neutral-100 px-3 py-3 dark:border-neutral-900">
+          <div className="rounded-lg bg-neutral-50 p-3 dark:bg-neutral-900/40">
+            <div className="grid gap-2 text-xs text-neutral-600 dark:text-neutral-400 md:grid-cols-2">
+              <p><strong>원룸</strong>: 주방·침대가 한 공간. 월세 40만원 미만, 전세 5천만원 미만이면 수요 약함 주의.</p>
+              <p><strong>분리형 원룸</strong>: 중문/슬라이딩 도어로 주방·침실 분리.</p>
+              <p><strong>1.5룸</strong>: 거실 또는 소파 공간 + 방 1개 수준.</p>
+              <p><strong>투룸</strong>: 방 2개 또는 거실 겸 방 + 방 1개.</p>
+              <p><strong>정투룸</strong>: 방 2개 + 별도 거실.</p>
+              <p><strong>미니쓰리룸/쓰리룸</strong>: 방 3개 구성. 주변 아파트 공급과 경쟁 확인.</p>
+              <p><strong>주인세대</strong>: 쓰리룸급 구조에 자재·싱크대·인테리어가 고급인 세대.</p>
+              <p><strong>상가/점포</strong>: 사업자등록일, 환산보증금, 상가임대차 기준 별도 확인.</p>
+            </div>
+          </div>
+          <RegistryRightsTable title="건물등기부 권리" rights={buildingRights} />
+          <RegistryRightsTable title="토지등기부 권리" rights={landRights} />
+        </div>
+      </details>
+      )}
     </section>
   );
 }
@@ -4675,6 +4921,7 @@ function createEmptyTenantRow(index: number): Record<string, unknown> {
     name: "",
     room_type: "",
     field_occupancy_status: "needs_check",
+    field_contract_intent: "",
     use: "주거",
     move_in_date: null,
     confirmed_date: null,
@@ -4682,6 +4929,7 @@ function createEmptyTenantRow(index: number): Record<string, unknown> {
     dividend_request_date: null,
     deposit: null,
     monthly_rent: null,
+    area_sqm: null,
     has_opposing_power: null,
     dividend_rank: null,
     lien_registered: null,
@@ -4754,7 +5002,7 @@ function normalizeTenantRentRows(rows: unknown[]) {
 
 function normalizeTenantDocumentRows(document: CaseSourceDocument) {
   const tenantRoot = ensureTenantRoot(document);
-  const list = Array.isArray(tenantRoot.list) ? tenantRoot.list : [];
+  const list = sortTenantRowsByUnit(arrayRecords(tenantRoot.list));
   tenantRoot.list = list;
   normalizeTenantRentRows(list);
   refreshTenantTotals(tenantRoot);
@@ -4782,59 +5030,13 @@ function buildTenantDisplayRows(
     .sort((a, b) => compareTenantUnit(a.tenant, b.tenant) || a.originalIndex - b.originalIndex);
 }
 
-function compareTenantUnit(a: Record<string, unknown>, b: Record<string, unknown>): number {
-  const left = tenantUnitSortParts(a);
-  const right = tenantUnitSortParts(b);
-  if (left.floor !== right.floor) return left.floor - right.floor;
-  if (left.room !== right.room) return left.room - right.room;
-  return left.label.localeCompare(right.label, "ko");
-}
-
-function tenantUnitSortParts(tenant: Record<string, unknown>): {
-  floor: number;
-  room: number;
-  label: string;
-} {
-  const label = textValue(tenant.unit) || textValue(tenant.floor) || textValue(tenant.room);
-  if (!label) return { floor: 999, room: 999_999, label: "" };
-  const normalized = label.replace(/\s/g, "").toUpperCase();
-  const basement = normalized.match(/(?:지하|B)(\d+)/);
-  if (basement) {
-    const floor = Number(basement[1]);
-    return { floor: Number.isFinite(floor) ? -floor : -1, room: extractFirstNumber(normalized) ?? 0, label };
-  }
-  if (/옥탑|ROOF|루프/.test(normalized)) {
-    return { floor: 998, room: extractFirstNumber(normalized) ?? 998_000, label };
-  }
-  const floorMatch = normalized.match(/(\d+)층/);
-  const roomNumber = extractFirstNumber(normalized);
-  const floor = floorMatch
-    ? Number(floorMatch[1])
-    : roomNumber != null && roomNumber >= 100
-      ? Math.floor(roomNumber / 100)
-      : 999;
-  return {
-    floor: Number.isFinite(floor) ? floor : 999,
-    room: roomNumber ?? 999_999,
-    label,
-  };
-}
-
-function extractFirstNumber(value: string): number | null {
-  const match = value.match(/\d+/);
-  if (!match) return null;
-  const parsed = Number(match[0]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function mergeTenantReportDocument(
   documents: CaseSourceDocument[],
   document: CaseSourceDocument,
 ): CaseSourceDocument[] {
   normalizeTenantDocumentRows(document);
-  const incomingRows = arrayRecords(
-    getDocumentAnalysisPayload(document).tenants?.list,
-  );
+  const incomingPayload = getDocumentAnalysisPayload(document);
+  const incomingRows = arrayRecords(incomingPayload.tenants?.list);
   const existingTenantIndex = documents.findIndex(
     (doc) => getDocumentAnalysisPayload(doc).tenants,
   );
@@ -4845,88 +5047,14 @@ function mergeTenantReportDocument(
   if (!target) return [document, ...documents];
 
   const tenantRoot = ensureTenantRoot(target);
-  const list = Array.isArray(tenantRoot.list) ? tenantRoot.list : [];
-  tenantRoot.list = list;
-  mergeTenantRowsByUnit(list, incomingRows);
-  normalizeTenantRentRows(list);
+  const existingRows = arrayRecords(tenantRoot.list);
+  const resetRows = resetTenantRowsFromSpecification(existingRows, incomingRows);
+  tenantRoot.list = resetRows;
+  applyTenantMetadataFromSpecification(tenantRoot, incomingPayload.tenants);
+  normalizeTenantRentRows(resetRows);
   refreshTenantTotals(tenantRoot);
   nextDocuments.splice(existingTenantIndex + 1, 0, document);
   return nextDocuments;
-}
-
-function mergeTenantRowsByUnit(
-  targetRows: unknown[],
-  incomingRows: Record<string, unknown>[],
-) {
-  const byUnit = new Map<string, Record<string, unknown>>();
-  for (const row of targetRows) {
-    const record = asRecord(row);
-    const key = normalizeTenantUnit(record?.unit);
-    if (record && key) byUnit.set(key, record);
-  }
-
-  for (const incoming of incomingRows) {
-    const unitKey = normalizeTenantUnit(incoming.unit);
-    const target = unitKey ? byUnit.get(unitKey) : null;
-    if (!target) {
-      targetRows.push({ ...incoming });
-      continue;
-    }
-    mergeTenantRow(target, incoming);
-  }
-}
-
-function mergeTenantRow(
-  target: Record<string, unknown>,
-  incoming: Record<string, unknown>,
-) {
-  const fields = [
-    "name",
-    "field_occupancy_status",
-    "room_type",
-    "use",
-    "move_in_date",
-    "confirmed_date",
-    "business_registration_date",
-    "dividend_request_date",
-    "deposit",
-    "monthly_rent",
-    "has_opposing_power",
-    "dividend_rank",
-    "lien_registered",
-  ];
-  const conflicts: string[] = [];
-  for (const field of fields) {
-    const current = target[field];
-    const next = incoming[field];
-    if (isBlankTenantValue(current) && !isBlankTenantValue(next)) {
-      target[field] = next;
-      continue;
-    }
-    if (
-      !isBlankTenantValue(current) &&
-      !isBlankTenantValue(next) &&
-      textValue(current) !== textValue(next)
-    ) {
-      conflicts.push(`${field}: 기존 ${textValue(current)} / 명세서 ${textValue(next)}`);
-    }
-  }
-  const notes = [
-    textValue(target.notes),
-    textValue(incoming.notes) ? `[매각물건명세서]\n${textValue(incoming.notes)}` : "",
-    conflicts.length ? `[명세서 값 충돌]\n${conflicts.join("\n")}` : "",
-  ].filter(Boolean);
-  target.notes = [...new Set(notes)].join("\n\n");
-}
-
-function normalizeTenantUnit(raw: unknown): string {
-  const value = textValue(raw).replace(/\s+/g, "");
-  const m = value.match(/(\d{1,4})호/);
-  return m ? `${m[1]}호` : value;
-}
-
-function isBlankTenantValue(value: unknown): boolean {
-  return value == null || value === "" || textValue(value) === "";
 }
 
 function TenantRightsSummaryCard({
@@ -5071,7 +5199,7 @@ function TenantTextField({
   onChange: (value: string) => void;
   placeholder?: string;
   inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
-  tone?: "risk" | "success";
+  tone?: "risk" | "success" | "warning";
 }) {
   const [draft, setDraft] = useState(value);
   /* eslint-disable react-hooks/set-state-in-effect -- 입력값은 Enter/blur 저장 후 외부 보정값과 다시 동기화 */
@@ -5082,18 +5210,20 @@ function TenantTextField({
   const commit = () => {
     if (draft !== value) onChange(draft);
   };
+  const toneClass =
+    tone === "risk"
+      ? "border-rose-300 font-semibold text-rose-700 dark:border-rose-800 dark:text-rose-400"
+      : tone === "success"
+        ? "border-emerald-300 font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
+        : tone === "warning"
+          ? "border-amber-300 font-semibold text-amber-800 dark:border-amber-800 dark:text-amber-200"
+          : "border-neutral-300 dark:border-neutral-700";
   return (
     <label className="block text-xs font-medium text-neutral-500">
       {label}
       <input
         inputMode={inputMode}
-        className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm dark:bg-neutral-900 ${
-          tone === "risk"
-            ? "border-rose-300 font-semibold text-rose-700 dark:border-rose-800 dark:text-rose-400"
-            : tone === "success"
-              ? "border-emerald-300 font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
-            : "border-neutral-300 dark:border-neutral-700"
-        }`}
+        className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm dark:bg-neutral-900 ${toneClass}`}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -5120,7 +5250,7 @@ function TenantInlineInput({
   onChange: (value: string) => void;
   placeholder?: string;
   inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
-  tone?: "risk" | "success";
+  tone?: "risk" | "success" | "warning";
 }) {
   const [draft, setDraft] = useState(value);
   /* eslint-disable react-hooks/set-state-in-effect -- 입력값은 Enter/blur 저장 후 외부 보정값과 다시 동기화 */
@@ -5131,16 +5261,18 @@ function TenantInlineInput({
   const commit = () => {
     if (draft !== value) onChange(draft);
   };
+  const toneClass =
+    tone === "risk"
+      ? "border-rose-300 font-semibold text-rose-700 dark:border-rose-800 dark:text-rose-400"
+      : tone === "success"
+        ? "border-emerald-300 font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
+        : tone === "warning"
+          ? "border-amber-300 font-semibold text-amber-800 dark:border-amber-800 dark:text-amber-200"
+          : "border-neutral-200 dark:border-neutral-800";
   return (
     <input
       inputMode={inputMode}
-      className={`w-full min-w-0 rounded border px-2 py-1 text-xs tabular-nums dark:bg-neutral-900 ${
-        tone === "risk"
-          ? "border-rose-300 font-semibold text-rose-700 dark:border-rose-800 dark:text-rose-400"
-          : tone === "success"
-            ? "border-emerald-300 font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
-          : "border-neutral-200 dark:border-neutral-800"
-      }`}
+      className={`w-full min-w-0 rounded border px-2 py-1 text-xs tabular-nums dark:bg-neutral-900 ${toneClass}`}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -5180,7 +5312,7 @@ type TenantDistribution = {
 function DistributionBadge({
   distribution,
 }: {
-  distribution: TenantDistribution | undefined;
+  distribution: TenantDistributionView | undefined;
 }) {
   if (!distribution || distribution.status === "unknown") {
     return <span className="text-neutral-400">계산불가</span>;
@@ -5189,21 +5321,14 @@ function DistributionBadge({
     "inline-flex max-w-[180px] flex-col rounded-md px-2 py-1 text-[11px] font-medium leading-snug";
   const ratio = distribution.ratioPct;
   const className =
-    distribution.status === "no_request"
+    distribution.status === "no_request" || distribution.status === "none"
       ? `${base} bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200`
-      : ratio != null && ratio >= 100
+      : distribution.status === "full" || (ratio != null && ratio >= 100)
       ? `${base} bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200`
-      : ratio != null && ratio >= 50
+      : distribution.status === "partial" || (ratio != null && ratio > 0)
         ? `${base} bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200`
         : `${base} bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200`;
-  const label =
-    distribution.status === "full"
-      ? "전액 배당"
-      : distribution.status === "partial"
-        ? "일부 배당"
-        : distribution.status === "no_request"
-          ? "배당요구 없음"
-          : "배당 부족";
+  const label = distributionStatusLabel(distribution.status);
   return (
     <span className={className} title={distribution.note}>
       <span>{label}</span>
@@ -5377,17 +5502,17 @@ function RegistryRightsTable({
     <div className="space-y-2">
       <h4 className="text-sm font-medium">{title}</h4>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-xs">
+        <table className={TABLE_COMPACT}>
           <thead>
             <tr className="border-b text-neutral-500 dark:border-neutral-800">
-              <th className="py-2 pr-2">번호</th>
-              <th className="py-2 pr-2">일자</th>
-              <th className="py-2 pr-2">종류</th>
-              <th className="py-2 pr-2">권리자/입주자</th>
-              <th className="py-2 pr-2">호실</th>
-              <th className="py-2 pr-2">금액</th>
-              <th className="py-2 pr-2">소멸</th>
-              <th className="py-2">기타</th>
+              <th className={`${TC_TH} w-10`}>번호</th>
+              <th className={`${TC_TH} w-20`}>일자</th>
+              <th className={`${TC_TH} w-20`}>종류</th>
+              <th className={`${TC_TH} ${TC_UNIT}`}>권리자/입주자</th>
+              <th className={`${TC_TH} ${TC_UNIT}`}>호실</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>금액</th>
+              <th className={`${TC_TH} w-16`}>소멸</th>
+              <th className={TC_TH}>기타</th>
             </tr>
           </thead>
           <tbody>
@@ -5396,9 +5521,9 @@ function RegistryRightsTable({
                 key={`${textValue(right.no)}-${textValue(right.type)}-${i}`}
                 className="border-b border-neutral-100 dark:border-neutral-900"
               >
-                <td className="py-2 pr-2">{textValue(right.no) || "-"}</td>
-                <td className="py-2 pr-2">{textValue(right.date) || "-"}</td>
-                <td className="py-2 pr-2">
+                <td className={`${TC_TD} w-10`}>{textValue(right.no) || "-"}</td>
+                <td className={`${TC_TD} w-20`}>{textValue(right.date) || "-"}</td>
+                <td className={`${TC_TD} w-20`}>
                   {right.is_key_right === true ? (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
                       {textValue(right.type) || "-"} · 말소기준
@@ -5407,19 +5532,19 @@ function RegistryRightsTable({
                     textValue(right.type) || "-"
                   )}
                 </td>
-                <td className="py-2 pr-2">{textValue(right.holder) || "-"}</td>
-                <td className="py-2 pr-2">{textValue(right.unit) || "-"}</td>
-                <td className="py-2 pr-2 tabular-nums">
+                <td className={`${TC_TD} ${TC_UNIT}`}>{textValue(right.holder) || "-"}</td>
+                <td className={`${TC_TD} ${TC_UNIT}`}>{textValue(right.unit) || "-"}</td>
+                <td className={`${TC_TD} ${TC_MONEY} tabular-nums`}>
                   {wonValue(right.amount) || "-"}
                 </td>
-                <td className="py-2 pr-2">
+                <td className={`${TC_TD} w-16`}>
                   {typeof right.extinguished === "boolean"
                     ? right.extinguished
                       ? "소멸"
                       : "인수 가능"
                     : "-"}
                 </td>
-                <td className="max-w-[320px] py-2">
+                <td className={TC_TD}>
                   {joinText([
                     right.note,
                     right.case_number,
@@ -5668,7 +5793,10 @@ function GenericStructuredDocumentSummary({
 }
 
 function sourceDocumentKindLabel(kind: CaseSourceDocumentKind): string {
-  return SOURCE_DOCUMENT_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+  return (
+    SOURCE_DOCUMENT_KIND_OPTIONS.find((option) => option.value === kind)
+      ?.label ?? sourceDocumentKindFileLabel(kind)
+  );
 }
 
 type HighlightTone = "good" | "bad" | null;
@@ -5795,6 +5923,15 @@ function fieldOccupancyValue(raw: unknown): (typeof FIELD_OCCUPANCY_OPTIONS)[num
     : "needs_check";
 }
 
+function fieldContractIntentValue(
+  raw: unknown,
+): (typeof FIELD_CONTRACT_INTENT_OPTIONS)[number]["value"] {
+  const value = textValue(raw);
+  return FIELD_CONTRACT_INTENT_OPTIONS.some((option) => option.value === value)
+    ? (value as (typeof FIELD_CONTRACT_INTENT_OPTIONS)[number]["value"])
+    : "";
+}
+
 function numberValue(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v !== "string") return null;
@@ -5861,24 +5998,24 @@ function BidRoundsEditor({
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-left text-sm">
+        <table className={TABLE_COMPACT}>
           <thead>
             <tr className="border-b text-xs text-neutral-500">
-              <th className="py-2 pr-2">회차</th>
-              <th className="py-2 pr-2">최저가</th>
-              <th className="py-2 pr-2">내 입찰</th>
-              <th className="py-2 pr-2">결과</th>
-              <th className="py-2 pr-2">입찰일</th>
-              <th className="py-2 pr-2">메모</th>
-              <th className="py-2" />
+              <th className={`${TC_TH} w-10`}>회차</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>최저가</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>내 입찰</th>
+              <th className={`${TC_TH} w-14`}>결과</th>
+              <th className={`${TC_TH} w-24`}>입찰일</th>
+              <th className={TC_TH}>메모</th>
+              <th className={`${TC_TH} w-8`} />
             </tr>
           </thead>
           <tbody>
             {sorted.map((r) => (
               <tr key={r.id} className="border-b border-neutral-100 dark:border-neutral-900">
-                <td className="py-1 pr-2">
+                <td className={`${TC_TD} w-10`}>
                   <input
-                    className="w-14 rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs dark:bg-neutral-900"
                     type="number"
                     value={r.round}
                     onChange={(e) =>
@@ -5888,9 +6025,9 @@ function BidRoundsEditor({
                     }
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className={`${TC_TD} ${TC_MONEY}`}>
                   <input
-                    className="w-28 rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs tabular-nums dark:bg-neutral-900"
                     inputMode="numeric"
                     value={
                       r.minPrice != null ? formatWonDigits(r.minPrice) : ""
@@ -5902,9 +6039,9 @@ function BidRoundsEditor({
                     }
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className={`${TC_TD} ${TC_MONEY}`}>
                   <input
-                    className="w-28 rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs tabular-nums dark:bg-neutral-900"
                     inputMode="numeric"
                     value={
                       r.myBidPrice != null ? formatWonDigits(r.myBidPrice) : ""
@@ -5916,9 +6053,9 @@ function BidRoundsEditor({
                     }
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className={`${TC_TD} w-14`}>
                   <select
-                    className="rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs dark:bg-neutral-900"
                     value={r.result}
                     onChange={(e) =>
                       updateBidRound(caseId, r.id, {
@@ -5932,10 +6069,10 @@ function BidRoundsEditor({
                     <option value="lost">패찰</option>
                   </select>
                 </td>
-                <td className="py-1 pr-2">
+                <td className={`${TC_TD} w-24`}>
                   <input
                     type="date"
-                    className="w-36 rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs dark:bg-neutral-900"
                     value={r.bidDate ?? ""}
                     onChange={(e) =>
                       updateBidRound(caseId, r.id, {
@@ -5944,16 +6081,16 @@ function BidRoundsEditor({
                     }
                   />
                 </td>
-                <td className="py-1 pr-2">
+                <td className={TC_TD}>
                   <input
-                    className="w-32 rounded border px-1 py-0.5 dark:bg-neutral-900"
+                    className="w-full min-w-0 rounded border px-1 py-0.5 text-xs dark:bg-neutral-900"
                     value={r.memo}
                     onChange={(e) =>
                       updateBidRound(caseId, r.id, { memo: e.target.value })
                     }
                   />
                 </td>
-                <td className="py-1">
+                <td className={`${TC_TD} w-8`}>
                   <button
                     type="button"
                     className="text-xs text-rose-600 hover:underline"

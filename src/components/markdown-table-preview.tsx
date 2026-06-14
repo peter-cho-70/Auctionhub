@@ -4,6 +4,7 @@ import {
   parseMarkdownBlocks,
   textHasMarkdownTable,
 } from "@/lib/format/markdown-table-preview";
+import { TABLE_COMPACT, TC_TD, TC_TH } from "@/lib/ui/compact-table";
 
 type Props = {
   text: string;
@@ -38,13 +39,13 @@ export function MarkdownTablePreview({ text, className = "" }: Props) {
         }
         return (
           <div key={`tbl-${i}`} className="overflow-x-auto">
-            <table className="w-full min-w-[320px] border-collapse text-left text-xs">
+            <table className={`${TABLE_COMPACT} border-collapse`}>
               <thead>
                 <tr>
                   {block.headers.map((h, hi) => (
                     <th
                       key={hi}
-                      className="border border-neutral-200 bg-neutral-100/90 px-2 py-1.5 font-medium dark:border-neutral-700 dark:bg-neutral-800"
+                      className={`${TC_TH} border border-neutral-200 bg-neutral-100/90 font-medium dark:border-neutral-700 dark:bg-neutral-800`}
                     >
                       {h}
                     </th>
@@ -57,7 +58,7 @@ export function MarkdownTablePreview({ text, className = "" }: Props) {
                     {block.headers.map((_, ci) => (
                       <td
                         key={ci}
-                        className="border border-neutral-200 px-2 py-1.5 align-top dark:border-neutral-700"
+                        className={`${TC_TD} border border-neutral-200 align-top dark:border-neutral-700`}
                       >
                         {row[ci] ?? ""}
                       </td>

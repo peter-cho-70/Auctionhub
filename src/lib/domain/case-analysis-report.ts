@@ -15,6 +15,7 @@ import {
   computeRentSettingDerived,
 } from "@/lib/domain/rent-setting";
 import { DEFAULT_REPORT_TEMPLATE_VERSION } from "@/lib/domain/case-workflow";
+import { formatManwonWithSuffix } from "@/lib/format/manwon";
 import { formatWonWithUnit } from "@/lib/format/won";
 import { STATUS_LABELS } from "@/lib/domain/status-labels";
 import {
@@ -25,7 +26,12 @@ import {
   FIELD_PHOTO_REPORT_SECTION,
   FIELD_PHOTO_ZONE_LABEL,
 } from "@/lib/domain/field-photo-gallery";
-import { tenantRecordsForReport, TENANT_DIVIDEND_STATUS_LABEL } from "@/lib/domain/case-tenant-records";
+import {
+  tenantRecordsForReport,
+  TENANT_DIVIDEND_STATUS_LABEL,
+  summarizeTenantRecordDividends,
+} from "@/lib/domain/case-tenant-records";
+import { getExpectedDividendFromDocuments } from "@/lib/domain/tenant-dividend-display";
 import { computeBidYieldTable } from "@/lib/domain/bid-yield-table";
 
 export type CaseAnalysisReportOptions = {
@@ -161,8 +167,7 @@ function won(v: number | null | undefined): string {
 }
 
 function manwon(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "";
-  return `${Math.round(v).toLocaleString("ko-KR")}만원`;
+  return formatManwonWithSuffix(v);
 }
 
 export function computeReportSectionStatus(c: AuctionCase): ReportSectionStatus[] {
@@ -507,13 +512,14 @@ export function buildCaseAnalysisReport(
       r.dividendRequestDate.slice(0, 10),
       opposingLabel(r.hasOpposingPower),
       won(r.dividendAmount),
+      won(r.undividedAmount),
       TENANT_DIVIDEND_STATUS_LABEL[r.dividendStatus],
       (r.inquiryNotes || r.memo).slice(0, 60),
     ];
   });
   if (tenantTableRows.length === 0) {
     for (const r of c.rentSetting.unitRows) {
-      tenantTableRows.push([
+        tenantTableRows.push([
         r.unitNo || r.floor || "—",
         "",
         won(r.deposit),
@@ -524,21 +530,29 @@ export function buildCaseAnalysisReport(
         "확인필요",
         "",
         "",
+        "",
         r.note.slice(0, 60),
       ]);
     }
   }
+  const tenantDividendSummary = summarizeTenantRecordDividends(structuredTenants);
+  const expectedDividend = getExpectedDividendFromDocuments(c.sourceDocuments);
+  const tenantBidPrice =
+    expectedDividend?.bid_price ?? c.expectedBidPrice ?? c.minPrice;
   sections.push(
     section(
       8,
       "임차인 정보",
       [
         tenantTableRows.length > 0
-          ? dataTable(
-              ["호실", "권리자", "보증금", "월세", "전입", "확정", "배당", "대항력", "배당액", "상태", "비고"],
-              tenantTableRows,
-              opposing,
-            )
+          ? [
+              `<p class="muted">배당 기준 입찰가: ${won(tenantBidPrice)} · 전액 ${tenantDividendSummary.full} · 일부 ${tenantDividendSummary.partial} · 미배당 ${tenantDividendSummary.none}</p>`,
+              dataTable(
+                ["호실", "권리자", "보증금", "월세", "전입", "확정", "배당", "대항력", "배당액", "미배당액", "상태", "비고"],
+                tenantTableRows,
+                opposing,
+              ),
+            ].join("")
           : `<p class="empty">임차인 PDF 또는 임대세팅 호실을 입력하세요.</p>`,
         `<h3>건물관리업체</h3>`,
         kvTable([

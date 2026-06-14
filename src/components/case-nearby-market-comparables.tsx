@@ -5,6 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { AuctionCase, MultiFamilyAnalysis } from "@/lib/types/domain";
 import { sqmToPyeong } from "@/lib/domain/multifamily-analysis";
 import {
+  TABLE_COMPACT,
+  TC_MONEY,
+  TC_TD,
+  TC_TH,
+  TC_UNIT,
+} from "@/lib/ui/compact-table";
+import {
   buildJibunLabel,
   caseBuildingSqm,
   caseLandSqm,
@@ -485,33 +492,33 @@ export function CaseNearbyMarketComparables({ caseData, analysis }: Props) {
         </p>
       ) : (
         <div className="max-h-[min(420px,55vh)] overflow-auto rounded-lg border border-violet-100 bg-white dark:border-violet-900 dark:bg-neutral-950">
-          <table className="w-full min-w-[920px] text-left text-xs">
+          <table className={TABLE_COMPACT}>
             <thead className="sticky top-0 z-10 bg-neutral-100 dark:bg-neutral-900">
               <tr>
-                <th className="px-2 py-2">동</th>
-                <th className="px-2 py-2">지번</th>
-                <th className="px-2 py-2 text-right">거래면적(건물)</th>
+                <th className={`${TC_TH} w-14`}>동</th>
+                <th className={`${TC_TH} ${TC_UNIT}`}>지번</th>
+                <th className={`${TC_TH} w-20 text-right`}>거래면적(건물)</th>
                 {tradeTab === "sale" ? (
                   <>
-                    <th className="px-2 py-2 text-right">토지면적</th>
-                    <th className="px-2 py-2 text-right">토지차</th>
-                    <th className="px-2 py-2 text-right">건물차</th>
+                    <th className={`${TC_TH} w-16 text-right`}>토지면적</th>
+                    <th className={`${TC_TH} w-14 text-right`}>토지차</th>
+                    <th className={`${TC_TH} w-14 text-right`}>건물차</th>
                   </>
                 ) : (
-                  <th className="px-2 py-2 text-right">면적차</th>
+                  <th className={`${TC_TH} w-14 text-right`}>면적차</th>
                 )}
-                <th className="px-2 py-2 text-right">연식</th>
+                <th className={`${TC_TH} w-12 text-right`}>연식</th>
                 {tradeTab === "sale" ? (
-                  <th className="px-2 py-2 text-right">매매가</th>
+                  <th className={`${TC_TH} ${TC_MONEY} text-right`}>매매가</th>
                 ) : (
                   <>
-                    <th className="px-2 py-2 text-right">보증금</th>
-                    <th className="px-2 py-2 text-right">월세</th>
+                    <th className={`${TC_TH} ${TC_MONEY} text-right`}>보증금</th>
+                    <th className={`${TC_TH} w-[4.5rem] text-right`}>월세</th>
                   </>
                 )}
-                <th className="px-2 py-2">거래일</th>
-                <th className="px-2 py-2 text-right">지번차</th>
-                <th className="px-2 py-2">유사도</th>
+                <th className={`${TC_TH} w-20`}>거래일</th>
+                <th className={`${TC_TH} w-14 text-right`}>지번차</th>
+                <th className={TC_TH}>유사도</th>
               </tr>
             </thead>
             <tbody>
@@ -528,18 +535,18 @@ export function CaseNearbyMarketComparables({ caseData, analysis }: Props) {
                         : ""
                     }`}
                   >
-                    <td className="px-2 py-1.5">{item.dong || "-"}</td>
-                    <td className="px-2 py-1.5 font-medium tabular-nums">
+                    <td className={`${TC_TD} w-14`}>{item.dong || "-"}</td>
+                    <td className={`${TC_TD} ${TC_UNIT} font-medium tabular-nums`}>
                       {jibun || item.address || "-"}
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
+                    <td className={`${TC_TD} w-20 text-right tabular-nums`}>
                       {listingBuildingSqm(item) != null
                         ? `${listingBuildingSqm(item)}㎡`
                         : "-"}
                     </td>
                     {tradeTab === "sale" ? (
                       <>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
+                        <td className={`${TC_TD} w-16 text-right tabular-nums`}>
                           {listingLandSqm(item) != null
                             ? `${listingLandSqm(item)}㎡`
                             : "-"}
@@ -559,28 +566,28 @@ export function CaseNearbyMarketComparables({ caseData, analysis }: Props) {
                         )}
                       />
                     )}
-                    <td className="px-2 py-1.5 text-right tabular-nums">
+                    <td className={`${TC_TD} w-12 text-right tabular-nums`}>
                       {item.buildYear ?? "-"}
                     </td>
                     {tradeTab === "sale" ? (
-                      <td className="px-2 py-1.5 text-right font-medium tabular-nums">
+                      <td className={`${TC_TD} ${TC_MONEY} text-right font-medium tabular-nums`}>
                         {formatManwon(item.dealAmountManwon)}
                       </td>
                     ) : (
                       <>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
+                        <td className={`${TC_TD} ${TC_MONEY} text-right tabular-nums`}>
                           {formatManwon(item.depositManwon)}
                         </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
+                        <td className={`${TC_TD} w-[4.5rem] text-right tabular-nums`}>
                           {formatManwon(item.monthlyRentManwon)}
                         </td>
                       </>
                     )}
-                    <td className="px-2 py-1.5">{item.dealDate || "-"}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
+                    <td className={`${TC_TD} w-20`}>{item.dealDate || "-"}</td>
+                    <td className={`${TC_TD} w-14 text-right tabular-nums`}>
                       {formatJibunDiff(item, caseData)}
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className={TC_TD}>
                       <div className="flex flex-wrap gap-1">
                         {badges.map((badge) => (
                           <span
@@ -632,7 +639,7 @@ function areaDiffToneClass(tone: AreaDiffDisplay["tone"]): string {
 
 function AreaDiffCell({ display }: { display: AreaDiffDisplay }) {
   return (
-    <td className={`px-2 py-1.5 text-right tabular-nums ${areaDiffToneClass(display.tone)}`}>
+    <td className={`${TC_TD} w-14 text-right tabular-nums ${areaDiffToneClass(display.tone)}`}>
       {display.text}
     </td>
   );

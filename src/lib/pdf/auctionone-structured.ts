@@ -3,7 +3,15 @@ import type {
   CaseSourceDocumentKind,
 } from "@/lib/types/domain";
 import type { AuctionPdfExtract } from "@/lib/pdf/auction-pdf-parser";
+import {
+  parseCoverageRatiosFromText,
+  parseParkingFromText,
+  parseUnitCountFromUseLabel,
+  sumHouseholdFromText,
+} from "@/lib/pdf/floor-unit-inference";
+import { buildExpectedDividendStructuredJson } from "@/lib/pdf/expected-dividend-parser";
 import { buildSpeedAuctionStructuredJson } from "@/lib/pdf/speed-auction-structured";
+import { buildDaejangAuctionStructuredJson } from "@/lib/pdf/daejang-auction-structured";
 
 export const AUCTIONONE_PDF_PARSER_VERSION = "auctionone-pdf-v1";
 
@@ -86,7 +94,9 @@ export function buildAuctionOneStructuredJson(args: {
       },
       property: {
         address: {
-          full: extracted.address,
+          full: extracted.addressRoad ?? extracted.address,
+          jibun: extracted.addressJibun ?? extracted.address,
+          road: extracted.addressRoad ?? null,
         },
         property_type: extracted.propertyType,
       },
@@ -135,8 +145,11 @@ export function buildStructuredJsonForDocument(args: {
   meta: PdfImportMeta;
 }) {
   const { kind, extracted, rawText, meta } = args;
-  if (kind === "auctionone-pdf") {
+  if (kind === "speedauction-pdf" || kind === "auctionone-pdf") {
     return buildPdfStructuredJson({ extracted, rawText, meta });
+  }
+  if (kind === "daejangauction-pdf") {
+    return buildDaejangAuctionStructuredJson({ extracted, rawText, meta });
   }
 
   const commonMeta = {
@@ -174,6 +187,10 @@ export function buildStructuredJsonForDocument(args: {
         raw_text: rawText,
       },
     };
+  }
+
+  if (kind === "expected-dividend") {
+    return buildExpectedDividendStructuredJson({ rawText, meta });
   }
 
   if (kind === "building-ledger") {
@@ -884,13 +901,19 @@ function parseBuildingLedger(rawText: string) {
   const unitComposition = parseBuildingLedgerUnitComposition(rawText);
   const residentialUnits = sumCompositionUnits(unitComposition, "residential");
   const commercialUnits = sumCompositionUnits(unitComposition, "commercial");
+  const fromTextUnits = sumHouseholdFromText(rawText);
   const ledgerUnitCount =
     (parseNumberNear(rawText, [
+      /호수[·\/]가구수[·\/]세대수\s*(\d+)\s*호/,
       /호수\/가구수\/세대수\s*(\d+)\s*호/,
       /(?:가구수|세대수|호수)\s*[:：]?\s*(\d+)/,
       /다가구주택\s*\(?(\d+)\s*가구\)?/,
-    ]) ?? residentialUnits) ||
+    ]) ??
+      fromTextUnits ??
+      residentialUnits + commercialUnits) ||
     null;
+  const parkingFromText = parseParkingFromText(rawText);
+  const ratios = parseCoverageRatiosFromText(rawText);
   return {
     address:
       rawText.match(/도로명주소\s*([^\n]+)/)?.[1]?.trim() ??
@@ -906,20 +929,27 @@ function parseBuildingLedger(rawText: string) {
     unit_composition: unitComposition,
     floors_above_ground: parseNumberNear(rawText, [/지상\s*(\d+)\s*층/]),
     floors_below_ground: parseNumberNear(rawText, [/지하\s*(\d+)\s*층/]),
-    total_parking: parseNumberNear(rawText, [
-      /(?:총)?주차(?:대수)?\s*[:：]?\s*(\d+)/,
-    ]),
+    total_parking:
+      parseNumberNear(rawText, [
+        /(?:총|합계)?\s*주차(?:대수|장)?\s*[:：]?\s*(\d+)/,
+        /주차장\s*[:：]?\s*(\d+)/,
+        /옥(?:내|외)?\s*주차[^\d]*(\d+)/,
+      ]) ?? parkingFromText,
     land_area_sqm: parseNumberNear(rawText, [/대지면적\s*[:：]?\s*([\d,.]+)\s*㎡/]),
     building_area_sqm: parseNumberNear(rawText, [/건축면적\s*[:：]?\s*([\d,.]+)\s*㎡/]),
     total_area_sqm: parseNumberNear(rawText, [
       /(?:연면적|총면적)\s*[:：]?\s*([\d,.]+)\s*㎡/,
     ]),
-    building_coverage_ratio_pct: parseNumberNear(rawText, [
-      /건폐율\s*[:：]?\s*([\d,.]+)\s*%/,
-    ]),
-    floor_area_ratio_pct: parseNumberNear(rawText, [
-      /용적률?\s*[:：]?\s*([\d,.]+)\s*%/,
-    ]),
+    building_coverage_ratio_pct:
+      parseNumberNear(rawText, [
+        /건\s*폐\s*율\s*[:：]?\s*([\d,.]+)\s*%/,
+        /건폐율\s*[:：]?\s*([\d,.]+)\s*%/,
+      ]) ?? ratios.buildingCoveragePct,
+    floor_area_ratio_pct:
+      parseNumberNear(rawText, [
+        /용\s*적\s*률\s*[:：]?\s*([\d,.]+)\s*%/,
+        /용적률?\s*[:：]?\s*([\d,.]+)\s*%/,
+      ]) ?? ratios.floorAreaPct,
     approval_date: parseIsoDate(
       rawText.match(/(?:사용승인|승인일|사용검사)[^\d]*(\d{4}[.\-/년]\s*\d{1,2}[.\-/월]\s*\d{1,2})/)?.[1],
     ),
@@ -943,9 +973,13 @@ function extractBuildingMainUse(rawText: string): string | null {
 function parseBuildingLedgerUnitComposition(rawText: string) {
   const lines = rawText.split(/\r?\n/).map(cleanLine).filter(Boolean);
   return lines.flatMap((line, index) => {
-    const m = line.match(
-      /^주\d+\s+((?:지하|지상)?\s*\d+\s*층)\s+(.+?구조)\s+(.+?)\s+([\d,.]+)$/,
-    );
+    const m =
+      line.match(
+        /^주\d+\s+((?:지하|지상)?\s*\d+\s*층)\s+(.+?구조)\s+(.+?)\s+([\d,.]+)$/,
+      ) ??
+      line.match(
+        /^((?:지하|지상)?\s*\d+\s*층|\d+층)\s+(.+?구조)\s+(.+?)\s+([\d,.]+)$/,
+      );
     if (!m) return [];
     const floor = m[1]!.replace(/\s+/g, "");
     const useLabel = m[3]!.trim();
@@ -980,6 +1014,8 @@ function parseLedgerUnitCount(
   useLabel: string,
   useType: "residential" | "commercial" | "other",
 ): number {
+  const fromLabel = parseUnitCountFromUseLabel(useLabel);
+  if (fromLabel > 1) return fromLabel;
   const explicit = Number(useLabel.match(/(\d+)\s*호/)?.[1] ?? NaN);
   if (Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit);
   return useType === "commercial" || useType === "residential" ? 1 : 0;

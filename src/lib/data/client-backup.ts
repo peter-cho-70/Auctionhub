@@ -6,7 +6,7 @@ import { SNAPSHOT_STORAGE_KEY } from "@/lib/data/storage";
 const SNAPSHOT_KEY = SNAPSHOT_STORAGE_KEY;
 
 /** 로컬 스토리지 용량을 위해 최근 스냅샷만 유지 */
-export const MAX_LOCAL_DATA_SNAPSHOTS = 2;
+export const MAX_LOCAL_DATA_SNAPSHOTS = 5;
 
 type AppDataSnapshot = {
   id: string;
@@ -69,12 +69,16 @@ function tryPersistSnapshots(snapshots: AppDataSnapshot[]): boolean {
   }
 }
 
-export function saveLocalDataSnapshot(json: string, reason: string): void {
+export function saveLocalDataSnapshot(
+  json: string,
+  reason: string,
+  opts?: { preserveFull?: boolean },
+): void {
   if (!canUseStorage()) return;
   const parsed = safeParseAppDataJson(json);
   if (parsed instanceof Error) return;
 
-  const compactJson = compactAppDataJsonForStorage(json);
+  const compactJson = opts?.preserveFull ? json : compactAppDataJsonForStorage(json);
   const entry = createSnapshotEntry(compactJson, reason, parsed.cases.length);
   const previous = listLocalDataSnapshots();
   const candidates: AppDataSnapshot[] = [entry, ...previous].slice(

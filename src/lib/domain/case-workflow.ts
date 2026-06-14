@@ -2,9 +2,11 @@ import type {
   AuctionCase,
   CasePhase,
   CaseStatus,
+  PostAuctionLoanCounselorResult,
   PostAuctionWorkflow,
   PreAuctionWorkflow,
 } from "@/lib/types/domain";
+import { emptyPostAuctionLoanCounselorResult } from "@/lib/domain/loan-inquiry";
 import { computePreFieldInfoReadiness } from "@/lib/domain/multifamily-analysis";
 
 export const DEFAULT_REPORT_TEMPLATE_VERSION = "Ver0530";
@@ -83,29 +85,29 @@ export const POST_AUCTION_PACKAGES: {
   {
     id: "loan",
     label: "대출",
-    summary: "사전 한도·실행 대출 (낙찰 전·후 분리)",
-    tabs: ["post_workflow", "tools", "templates"],
+    summary: "대출 문의 문자",
+    tabs: ["templates"],
     studySteps: ["loan_check", "won", "balance"],
   },
   {
     id: "eviction",
     label: "명도",
-    summary: "점유자·명도 계획·실행",
-    tabs: ["post_workflow", "tenant_analysis", "templates"],
+    summary: "세입자·점유 현황",
+    tabs: ["tenant_analysis"],
     studySteps: ["eviction", "won_day_action"],
   },
   {
     id: "leasing",
     label: "임대",
-    summary: "임대 세팅·마케팅·운영",
-    tabs: ["post_workflow", "rent", "multi_family"],
+    summary: "임대 세팅·수익",
+    tabs: ["rent"],
     studySteps: ["leasing"],
   },
   {
     id: "remodeling",
     label: "리모델링",
     summary: "선택 — 공사 범위·비용",
-    tabs: ["post_workflow", "remodeling"],
+    tabs: ["remodeling"],
     studySteps: ["leasing"],
   },
 ];
@@ -151,7 +153,14 @@ export function emptyPreAuctionWorkflow(): PreAuctionWorkflow {
 
 export function emptyPostAuctionWorkflow(): PostAuctionWorkflow {
   return {
-    loanPackage: { preApprovalNotes: "", executionNotes: "", memo: "" },
+    loanPackage: {
+      preApprovalNotes: "",
+      executionNotes: "",
+      memo: "",
+      counselorResult: emptyPostAuctionLoanCounselorResult(),
+      calcLoanAmount: null,
+      calcAnnualRate: null,
+    },
     evictionPackage: { tenantSummary: "", planNotes: "", memo: "" },
     leasingPackage: { targetRentNotes: "", marketingNotes: "", memo: "" },
     remodelingEnabled: false,
@@ -240,11 +249,39 @@ function normalizePackageNotes(
   return out;
 }
 
+function normalizeMoneyField(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function normalizeRatioField(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return null;
+  return v;
+}
+
+function normalizeLoanCounselorResult(raw: unknown): PostAuctionLoanCounselorResult {
+  const base = emptyPostAuctionLoanCounselorResult();
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  return {
+    collateralRatio: normalizeRatioField(o.collateralRatio),
+    mortgageSummary:
+      typeof o.mortgageSummary === "string" ? o.mortgageSummary : "",
+    trustSummary: typeof o.trustSummary === "string" ? o.trustSummary : "",
+    confirmedLoanLimit: normalizeMoneyField(o.confirmedLoanLimit),
+    annualRate: normalizeRatioField(o.annualRate),
+    notes: typeof o.notes === "string" ? o.notes : "",
+  };
+}
+
 export function normalizePostAuctionWorkflow(raw: unknown): PostAuctionWorkflow {
   const base = emptyPostAuctionWorkflow();
   if (!raw || typeof raw !== "object") return base;
   const o = raw as Record<string, unknown>;
-  const loan = normalizePackageNotes(o.loanPackage, [
+  const loanRaw =
+    o.loanPackage && typeof o.loanPackage === "object"
+      ? (o.loanPackage as Record<string, unknown>)
+      : null;
+  const loan = normalizePackageNotes(loanRaw, [
     "preApprovalNotes",
     "executionNotes",
     "memo",
@@ -269,6 +306,9 @@ export function normalizePostAuctionWorkflow(raw: unknown): PostAuctionWorkflow 
       preApprovalNotes: loan.preApprovalNotes ?? "",
       executionNotes: loan.executionNotes ?? "",
       memo: loan.memo ?? "",
+      counselorResult: normalizeLoanCounselorResult(loanRaw?.counselorResult),
+      calcLoanAmount: normalizeMoneyField(loanRaw?.calcLoanAmount),
+      calcAnnualRate: normalizeRatioField(loanRaw?.calcAnnualRate),
     },
     evictionPackage: {
       tenantSummary: eviction.tenantSummary ?? "",
@@ -317,7 +357,9 @@ export function computePreAuctionBlockReadiness(
       cl.items.some((it) => it.done),
   );
   const hasTenantSource = c.sourceDocuments.some((d) =>
-    ["auctionone-pdf", "tenant-report", "pdf"].includes(d.kind),
+    ["daejangauction-pdf", "speedauction-pdf", "auctionone-pdf", "tenant-report", "pdf"].includes(
+      d.kind,
+    ),
   );
   const hasBidAnalysis =
     c.auctionSaleComparables.length > 0 ||
@@ -404,9 +446,12 @@ export function computePostAuctionPackageReadiness(
   c: AuctionCase,
 ): Record<PostAuctionPackageId, BlockReadiness> {
   const p = c.postAuction;
+  const cr = p.loanPackage.counselorResult;
   const loanFilled = [
-    p.loanPackage.preApprovalNotes.trim(),
-    p.loanPackage.executionNotes.trim(),
+    cr.collateralRatio != null,
+    cr.mortgageSummary.trim(),
+    cr.confirmedLoanLimit != null,
+    cr.annualRate != null,
   ].filter(Boolean).length;
   const evictionFilled = [
     p.evictionPackage.tenantSummary.trim(),
@@ -430,7 +475,13 @@ export function computePostAuctionPackageReadiness(
   }
 
   return {
-    loan: build(loanFilled, 2, loanFilled < 2 ? ["대출 사전·실행 메모"] : []),
+    loan: build(
+      loanFilled,
+      4,
+      loanFilled < 3
+        ? ["담보인정비율·근저당·한도·이율 정리"]
+        : [],
+    ),
     eviction: build(
       evictionFilled,
       2,
@@ -493,7 +544,24 @@ export function buildPostAuctionPackageHtml(
   }[packageId];
   let body = "";
   if (packageId === "loan") {
+    const cr = p.loanPackage.counselorResult;
     body = [
+      cr.collateralRatio != null
+        ? para(
+            `담보인정비율: ${Math.round(cr.collateralRatio * 1000) / 10}%`,
+          )
+        : "",
+      cr.mortgageSummary.trim()
+        ? para(`근저당: ${cr.mortgageSummary}`)
+        : "",
+      cr.trustSummary.trim() ? para(`신탁: ${cr.trustSummary}`) : "",
+      cr.confirmedLoanLimit != null
+        ? para(`확인 대출 한도: ${cr.confirmedLoanLimit.toLocaleString("ko-KR")}원`)
+        : "",
+      cr.annualRate != null
+        ? para(`연 이율: ${Math.round(cr.annualRate * 10000) / 100}%`)
+        : "",
+      cr.notes.trim() ? para(cr.notes) : "",
       para(`사전 한도: ${p.loanPackage.preApprovalNotes || "—"}`),
       para(`실행 대출: ${p.loanPackage.executionNotes || "—"}`),
       para(p.loanPackage.memo || ""),

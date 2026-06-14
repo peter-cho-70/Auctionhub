@@ -7,10 +7,7 @@ import {
   MAX_AUCTION_SALE_COMPARABLES,
   MAX_PDF_COMPARABLES_PER_BATCH,
 } from "@/lib/domain/auction-bid-analysis";
-import {
-  applyStorageReclaim,
-  getStorageQuotaMessage,
-} from "@/lib/data/compact-storage";
+import { applyStorageReclaim } from "@/lib/data/compact-storage";
 import { auctionPdfExtractToComparable } from "@/lib/pdf/pdf-to-comparable";
 import type { AuctionPdfExtract } from "@/lib/pdf/auction-pdf-parser";
 import { useAppStore } from "@/store/app-store";
@@ -129,16 +126,11 @@ export function AuctionComparablePdfImport({
       }
 
       const storedTotal = appendAuctionSaleComparables(caseId, added);
-      const quota = getStorageQuotaMessage();
 
       if (storedTotal < 0) {
         setLocalLog(`파싱 ${added.length}건 — 저장 실패(물건 없음).`);
       } else {
-        setLocalLog(
-          quota
-            ? `저장 ${storedTotal}건 (PDF ${added.length}건). ${quota}`
-            : `완료: 매각 사례 ${storedTotal}건 (방금 ${added.length}건 추가)`,
-        );
+        setLocalLog(`완료: 매각 사례 ${storedTotal}건 (방금 ${added.length}건 추가)`);
         useAppStore.getState().setBidPdfImportLog(
           `PDF ${added.length}건 추가 · 총 ${storedTotal}건`,
         );

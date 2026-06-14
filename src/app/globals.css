@@ -97,3 +97,13 @@ body {
 .lecture-doc-preview h3:first-child {
   margin-top: 0;
 }
+
+/* 앱 내 데이터 표 — 열이 불필요하게 넓어지지 않도록 */
+.table-compact :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+.table-compact td,
+.table-compact th {
+  overflow: hidden;
+}

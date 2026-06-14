@@ -18,6 +18,8 @@ import {
 } from "@/lib/data/client-backup";
 import { applyStorageReclaim } from "@/lib/data/compact-storage";
 import { FIELD_INTEL_GUIDES } from "@/lib/domain/field-intel";
+import { PdfCoverSettingsPanel } from "@/components/pdf-cover-settings-panel";
+import { CaseListRecoveryBanner } from "@/components/case-list-recovery-banner";
 import { useAppStore } from "@/store/app-store";
 
 function snapshotCasePreview(json: string) {
@@ -45,6 +47,8 @@ export function DataPageClient({
   const exportDataJson = useAppStore((s) => s.exportDataJson);
   const importData = useAppStore((s) => s.importData);
   const resetToDefaults = useAppStore((s) => s.resetToDefaults);
+  const clearAllMarketData = useAppStore((s) => s.clearAllMarketData);
+  const guMarketCache = useAppStore((s) => s.data.guMarketCache);
   const addKnowledgeNote = useAppStore((s) => s.addKnowledgeNote);
   const notes = useAppStore((s) => s.data.knowledgeNotes);
   const cases = useAppStore((s) => s.data.cases);
@@ -200,7 +204,7 @@ export function DataPageClient({
     }
     saveLocalDataSnapshot(json, "manual-snapshot");
     refreshSnapshots();
-    setMsg("로컬 스냅샷을 저장했습니다. (최대 2개 유지)");
+    setMsg("로컬 스냅샷을 저장했습니다. (최대 5개 유지)");
   };
 
   const restoreSnapshot = (snapshot: (typeof snapshots)[number]) => {
@@ -342,13 +346,17 @@ export function DataPageClient({
         </p>
       )}
 
+      <PdfCoverSettingsPanel />
+
+      <CaseListRecoveryBanner />
+
       <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="font-medium">로컬 자동 스냅샷</h2>
             <p className="mt-1 text-xs opacity-90">
               클라우드 병합, JSON 가져오기, 초기화·편집 후 등 최근 상태를
-              최대 2개만 보관합니다. 용량이 부족하면 기존 스냅샷을 지우지 않고
+              최대 5개만 보관합니다. 용량이 부족하면 기존 스냅샷을 지우지 않고
               새 항목만 건너뜁니다. 편집 후 약 90초 뒤 자동 저장됩니다.
             </p>
           </div>
@@ -452,6 +460,49 @@ export function DataPageClient({
           }}
         >
           PDF 원문·스냅샷 줄이기
+        </button>
+      </section>
+
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+        <h2 className="font-medium text-amber-950 dark:text-amber-100">
+          시세 데이터
+        </h2>
+        <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-100/80">
+          모든 물건의 주변 시세 분석·부동산/AI 참고 메모를 삭제합니다. 국토부 구
+          단위 캐시({Object.keys(guMarketCache).length}개 구)는 유지되어 다른
+          물건에서 재사용할 수 있습니다. 물건·임차인 등 다른 데이터도 유지됩니다.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            const guCount = Object.keys(guMarketCache).length;
+            const caseCount = cases.filter(
+              (c) =>
+                c.nearbyMarketAnalysis != null ||
+                (c.brokerMarketNotes?.length ?? 0) > 0 ||
+                (c.aiMarketNotes?.length ?? 0) > 0,
+            ).length;
+            if (caseCount === 0) {
+              setMsg("삭제할 물건별 시세 데이터가 없습니다.");
+              return;
+            }
+            if (
+              !confirm(
+                `시세가 붙은 물건 ${caseCount}건의 주변 시세·참고 메모를 지웁니다. 국토부 구 캐시 ${guCount}개는 유지됩니다. 계속할까요?`,
+              )
+            ) {
+              return;
+            }
+            saveLocalDataSnapshot(exportDataJson(), "before-clear-market-data");
+            refreshSnapshots();
+            const { guCacheKeys, casesCleared } = clearAllMarketData();
+            setMsg(
+              `물건별 시세를 삭제했습니다. (${casesCleared}건, 구 캐시 ${guCacheKeys}개 유지). 클라우드 동기화 사용 중이면 「클라우드에 저장」도 눌러 주세요.`,
+            );
+          }}
+          className="mt-3 rounded-lg border border-amber-400 bg-white px-4 py-2 text-sm font-medium text-amber-950 dark:border-amber-800 dark:bg-neutral-950 dark:text-amber-100"
+        >
+          시세 정보 전체 삭제
         </button>
       </section>
 

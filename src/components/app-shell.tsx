@@ -3,50 +3,37 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { StorageQuotaBanner } from "@/components/storage-quota-banner";
+import { AppExperienceToggle } from "@/components/app-experience-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LAST_SELECTED_CASE_KEY } from "@/lib/constants/storage";
+import { caseListTitle } from "@/lib/domain/case-list-display";
+import {
+  readAppExperienceMode,
+  type AppExperienceMode,
+  writeAppExperienceMode,
+} from "@/lib/ui/app-experience-mode";
 import { useAppStore } from "@/store/app-store";
 
-const menuGroups = [
-  {
-    title: "물건 관리",
-    links: [
-      { href: "/cases", label: "물건 목록" },
-      { href: "/cases", label: "상세항목", kind: "last-case-detail" },
-    ],
-  },
-  {
-    title: "가져오기",
-    links: [
-      { href: "/cases/import-pdf", label: "PDF 등록" },
+function importLinksForMode(mode: AppExperienceMode) {
+  if (mode === "renewal") {
+    return [
+      { href: "/cases/import", label: "PDF 등록" },
+      { href: "/cases/import-pdf", label: "PDF 등록 (올드)" },
       { href: "/cases/import-json", label: "JSON 등록" },
-    ],
-  },
-  {
-    title: "업무/자료",
-    links: [
-      { href: "/process", label: "프로세스" },
-      { href: "/study", label: "공부하기" },
-      { href: "/remodeling", label: "리모델링" },
-      { href: "/field-intel", label: "탐문·시장" },
-      { href: "/lectures", label: "강의 원본" },
-    ],
-  },
-  {
-    title: "관리",
-    links: [
-      { href: "/data", label: "데이터" },
-      { href: "/login", label: "계정" },
-    ],
-  },
-];
+    ];
+  }
+  return [
+    { href: "/cases/import-pdf", label: "PDF 등록" },
+    { href: "/cases/import", label: "PDF 등록 (뉴)" },
+    { href: "/cases/import-json", label: "JSON 등록" },
+  ];
+}
 
 function isCaseDetailPath(pathname: string): boolean {
   return (
     pathname.startsWith("/cases/") &&
     !pathname.startsWith("/cases/new") &&
-    !pathname.startsWith("/cases/import-")
+    !pathname.startsWith("/cases/import")
   );
 }
 
@@ -63,6 +50,9 @@ function isActivePath(pathname: string, href: string, kind?: string): boolean {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const cases = useAppStore((s) => s.data.cases);
+  const [experienceMode, setExperienceMode] = useState<AppExperienceMode>(() =>
+    readAppExperienceMode(),
+  );
   const [lastSelectedCaseId, setLastSelectedCaseId] = useState<string | null>(
     () =>
       typeof window === "undefined"
@@ -76,6 +66,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const lastSelectedCase = useMemo(
     () => cases.find((c) => c.id === effectiveLastSelectedCaseId) ?? null,
     [cases, effectiveLastSelectedCaseId],
+  );
+
+  const menuGroups = useMemo(
+    () => [
+      {
+        title: "물건 관리",
+        links: [
+          { href: "/cases", label: "물건 목록" },
+          { href: "/cases", label: "상세항목", kind: "last-case-detail" },
+        ],
+      },
+      {
+        title: "가져오기",
+        links: importLinksForMode(experienceMode),
+      },
+      {
+        title: "업무/자료",
+        links: [
+          { href: "/process", label: "프로세스" },
+          { href: "/study", label: "공부하기" },
+          { href: "/remodeling", label: "리모델링" },
+          { href: "/field-intel", label: "탐문·시장" },
+          { href: "/lectures", label: "강의 원본" },
+        ],
+      },
+      {
+        title: "관리",
+        links: [
+          { href: "/data", label: "데이터" },
+          { href: "/login", label: "계정" },
+        ],
+      },
+    ],
+    [experienceMode],
   );
 
   useEffect(() => {
@@ -121,9 +145,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       title={
                         kind === "last-case-detail"
                           ? lastSelectedCase
-                            ? lastSelectedCase.address ||
-                              lastSelectedCase.caseNumber ||
-                              "선택한 물건 상세"
+                            ? caseListTitle(lastSelectedCase)
                             : "선택한 물건이 없으면 물건 목록으로 이동합니다."
                           : undefined
                       }
@@ -140,12 +162,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             ))}
           </nav>
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <AppExperienceToggle
+              compact
+              value={experienceMode}
+              onChange={(mode) => {
+                writeAppExperienceMode(mode);
+                setExperienceMode(mode);
+              }}
+            />
             <ThemeToggle />
           </div>
         </div>
       </header>
-      <StorageQuotaBanner />
       <main className="mx-auto w-full max-w-6xl flex-1 bg-[var(--background)] px-4 py-6">
         {children}
       </main>

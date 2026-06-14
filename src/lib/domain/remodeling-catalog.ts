@@ -1,4 +1,5 @@
 import { DEFAULT_REMODELING_PRICE_CATALOG } from "@/lib/domain/remodeling-catalog-daejeon";
+import { normalizeStoredManwon } from "@/lib/format/manwon";
 import type {
   RemodelingCatalogItem,
   RemodelingCostLine,
@@ -36,7 +37,9 @@ function normalizeRentUplift(raw: unknown): RemodelingCatalogItem["rentUpliftMan
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const num = (k: string) => {
     const v = o[k];
-    return typeof v === "number" && Number.isFinite(v) ? Math.round(Math.max(0, v)) : 0;
+    return typeof v === "number" && Number.isFinite(v)
+      ? (normalizeStoredManwon(v) ?? 0)
+      : 0;
   };
   return {
     oneRoom: num("oneRoom"),
@@ -59,11 +62,11 @@ export function normalizeCatalogItem(raw: unknown): RemodelingCatalogItem | null
     workScope: normalizeWorkScope(o.workScope),
     materialManwon:
       typeof o.materialManwon === "number" && Number.isFinite(o.materialManwon)
-        ? Math.round(Math.max(0, o.materialManwon))
+        ? (normalizeStoredManwon(o.materialManwon) ?? 0)
         : 0,
     laborManwon:
       typeof o.laborManwon === "number" && Number.isFinite(o.laborManwon)
-        ? Math.round(Math.max(0, o.laborManwon))
+        ? (normalizeStoredManwon(o.laborManwon) ?? 0)
         : 0,
     diy: o.diy === true,
     effectNote: typeof o.effectNote === "string" ? o.effectNote : "",

@@ -37,6 +37,15 @@ function normalizeNonNegativeNumberOrNull(
   return Math.min(max, v);
 }
 
+/** 목록·상세 제목: 지번 · 채무자 */
+export function pdfExtractListTitle(extracted: AuctionPdfExtract): string | undefined {
+  const jibun = extracted.addressJibun?.trim() || extracted.address?.trim();
+  const debtor = extracted.debtor?.trim();
+  if (jibun && debtor) return `${jibun} · ${debtor}`;
+  if (jibun) return jibun;
+  return debtor || undefined;
+}
+
 function buildMemo(extracted: AuctionPdfExtract): string | undefined {
   const parts: string[] = [];
   if (extracted.court) parts.push(`법원: ${extracted.court}`);
@@ -67,7 +76,11 @@ export function auctionPdfExtractToNewCaseInput(args: {
   if (!extracted.address) warnings.push("주소를 찾지 못했습니다.");
   if (!extracted.minPrice) warnings.push("최저가를 찾지 못했습니다.");
   if (!extracted.bidDate) warnings.push("매각기일(입찰일)을 찾지 못했습니다.");
-  if (extracted.format === "speedauction" && extracted.auctionStatus === "ongoing") {
+  if (
+    (extracted.format === "speedauction" ||
+      extracted.format === "daejangauction") &&
+    extracted.auctionStatus === "ongoing"
+  ) {
     warnings.push(
       "진행 중인 경매 PDF입니다. 낙찰가·가율은 없으며 입찰가 분석 비교 사례로는 부적합할 수 있습니다.",
     );
@@ -98,7 +111,16 @@ export function auctionPdfExtractToNewCaseInput(args: {
       extracted.householdCountHint,
       { floor: true, max: 9999 },
     ),
+    buildingCoverageRatio:
+      extracted.buildingCoverageRatioPct != null
+        ? `${extracted.buildingCoverageRatioPct}%`
+        : undefined,
+    floorAreaRatio:
+      extracted.floorAreaRatioPct != null
+        ? `${extracted.floorAreaRatioPct}%`
+        : undefined,
     memo: buildMemo(extracted),
+    listTitle: pdfExtractListTitle(extracted),
   };
 
   if (!input.sourceUrl) {

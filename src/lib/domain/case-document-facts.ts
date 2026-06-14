@@ -1,3 +1,4 @@
+import { inferUnitsFromAppraisalFloors } from "@/lib/pdf/floor-unit-inference";
 import type {
   AuctionCase,
   BuildingUnitComposition,
@@ -33,6 +34,8 @@ export interface CaseDocumentFacts {
   minPrice: number | null;
   bidDate: string | null;
   lienBaseline: string | null;
+  /** PDF 지번 → 목록 제목 */
+  listTitle: string | null;
   tenantCount: number | null;
   totalDeposit: number;
   totalMonthlyRent: number;
@@ -40,6 +43,42 @@ export interface CaseDocumentFacts {
   buildingLedgerUnits: number | null;
   buildingLedgerFloors: string | null;
   summaries: CaseDocumentFactSummary[];
+}
+
+export function jibunTitleFromStructuredJson(raw: unknown): string | null {
+  return listTitleFromStructuredJson(raw);
+}
+
+/** PDF 지번 · 채무자 형식 목록 제목 */
+export function listTitleFromStructuredJson(raw: unknown): string | null {
+  const root =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
+  if (!root) return null;
+  const auctionCase =
+    root.auction_case && typeof root.auction_case === "object"
+      ? (root.auction_case as Record<string, unknown>)
+      : null;
+  const property =
+    auctionCase?.property && typeof auctionCase.property === "object"
+      ? (auctionCase.property as Record<string, unknown>)
+      : null;
+  const address =
+    property?.address && typeof property.address === "object"
+      ? (property.address as Record<string, unknown>)
+      : null;
+  const parties =
+    auctionCase?.parties && typeof auctionCase.parties === "object"
+      ? (auctionCase.parties as Record<string, unknown>)
+      : null;
+  const jibun =
+    typeof address?.jibun === "string" ? address.jibun.trim() : "";
+  const debtor =
+    typeof parties?.debtor === "string" ? parties.debtor.trim() : "";
+  if (jibun && debtor) return `${jibun} · ${debtor}`;
+  if (jibun) return jibun;
+  return debtor || null;
 }
 
 export function extractCaseDocumentFacts(
@@ -65,6 +104,7 @@ export function extractCaseDocumentFacts(
     minPrice: null,
     bidDate: null,
     lienBaseline: null,
+    listTitle: null,
     tenantCount: null,
     totalDeposit: 0,
     totalMonthlyRent: 0,
@@ -95,9 +135,12 @@ export function extractCaseDocumentFacts(
       assignNumber(facts, "buildingAreaSqm", appraisalReport.building_total_area_sqm);
     }
 
-    const tenants = asRecord(document?.tenants);
-    if (tenants) {
-      mergeTenantFacts(facts, tenants);
+    const tenantsRaw = document?.tenants;
+    if (Array.isArray(tenantsRaw)) {
+      mergeTenantListFacts(facts, tenantsRaw);
+    } else {
+      const tenants = asRecord(tenantsRaw);
+      if (tenants) mergeTenantFacts(facts, tenants);
     }
 
     const registry = asRecord(document?.registry);
@@ -123,11 +166,10 @@ export function buildCasePatchFromDocumentFacts(
   if (c.householdCount == null && facts.householdCount != null) {
     patch.householdCount = facts.householdCount;
   }
-  if (facts.residentialUnitCount != null) {
+  if (c.residentialUnitCount == null && facts.residentialUnitCount != null) {
     patch.residentialUnitCount = facts.residentialUnitCount;
-    patch.householdCount = facts.residentialUnitCount;
   }
-  if (facts.commercialUnitCount != null) {
+  if (c.commercialUnitCount == null && facts.commercialUnitCount != null) {
     patch.commercialUnitCount = facts.commercialUnitCount;
   }
   if (facts.buildingUnitComposition.length > 0) {
@@ -163,6 +205,7 @@ export function buildCasePatchFromDocumentFacts(
   }
   if (c.bidDate == null && facts.bidDate) patch.bidDate = facts.bidDate;
   if (!c.lienBaseline && facts.lienBaseline) patch.lienBaseline = facts.lienBaseline;
+  if (!c.listTitle.trim() && facts.listTitle) patch.listTitle = facts.listTitle;
   return patch;
 }
 
@@ -177,7 +220,7 @@ function mergeAuctionCaseFacts(
   const land = asRecord(appraisal?.land);
   const saleSchedule = asRecord(payload.sale_schedule);
   const buildingSummary = asRecord(payload.building_summary);
-  const tenants = asRecord(payload.tenants);
+  const tenantTotals = asRecord(payload.tenant_totals);
   const buildingRegistry = asRecord(payload.building_registry);
   const landRegistry = asRecord(payload.land_registry);
   const schedules = Array.isArray(saleSchedule?.schedules)
@@ -186,17 +229,68 @@ function mergeAuctionCaseFacts(
   const currentSchedule =
     schedules.find((x) => x?.is_current === true) ?? schedules[0] ?? null;
 
+  const parties = asRecord(payload.parties);
   assignString(facts, "caseNumber", caseInfo?.case_number);
-  assignString(facts, "address", address?.full);
+  assignString(facts, "address", address?.full ?? address?.jibun);
+  const jibunTitle = textValue(address?.jibun);
+  const debtorTitle = textValue(parties?.debtor);
+  if (jibunTitle && !facts.listTitle) {
+    facts.listTitle = debtorTitle
+      ? `${jibunTitle} · ${debtorTitle}`
+      : jibunTitle;
+  }
   assignString(facts, "propertyType", property?.property_type);
   assignString(facts, "builtYear", buildingSummary?.approval_or_built_date);
   assignNumber(facts, "parkingUnitCount", buildingSummary?.parking_unit_count);
+  assignNumberMax(
+    facts,
+    "householdCount",
+    buildingSummary?.household_count_hint,
+  );
+  assignNumberMax(
+    facts,
+    "residentialUnitCount",
+    buildingSummary?.residential_unit_count,
+  );
+  assignNumberMax(
+    facts,
+    "commercialUnitCount",
+    buildingSummary?.commercial_unit_count,
+  );
+  assignRatio(facts, "buildingCoverageRatio", buildingSummary?.building_coverage_ratio_pct);
+  assignRatio(facts, "floorAreaRatio", buildingSummary?.floor_area_ratio_pct);
   assignNumber(facts, "appraisalPrice", appraisal?.total_appraisal_value);
   assignNumber(facts, "landAreaSqm", land?.area_sqm);
-  assignNumber(facts, "buildingAreaSqm", appraisal?.building_total_area_sqm);
-  assignNumber(facts, "minPrice", currentSchedule?.minimum_price);
+  const building = asRecord(appraisal?.building);
+  assignNumber(
+    facts,
+    "buildingAreaSqm",
+    building?.total_area_sqm ?? appraisal?.building_total_area_sqm,
+  );
+  assignNumber(
+    facts,
+    "minPrice",
+    currentSchedule?.minimum_price ?? caseInfo?.min_price,
+  );
   assignString(facts, "bidDate", currentSchedule?.date);
-  if (tenants) mergeTenantFacts(facts, tenants);
+  assignString(facts, "lienBaseline", caseInfo?.lien_baseline);
+
+  const floors = Array.isArray(appraisal?.floors) ? appraisal.floors : [];
+  if (floors.length > 0) mergeAppraisalFloorsFacts(facts, floors);
+
+  const tenantsRaw = payload.tenants;
+  if (Array.isArray(tenantsRaw)) {
+    mergeTenantListFacts(facts, tenantsRaw);
+  } else {
+    const tenants = asRecord(tenantsRaw);
+    if (tenants) mergeTenantFacts(facts, tenants);
+  }
+  if (tenantTotals) {
+    const deposit = numberValue(tenantTotals.deposit_total);
+    const rent = numberValue(tenantTotals.monthly_rent_total);
+    if (deposit != null) facts.totalDeposit = Math.max(facts.totalDeposit, deposit);
+    if (rent != null) facts.totalMonthlyRent = Math.max(facts.totalMonthlyRent, rent);
+  }
   if (buildingRegistry) mergeRegistryFacts(facts, buildingRegistry);
   if (landRegistry) mergeRegistryFacts(facts, landRegistry);
 }
@@ -230,6 +324,63 @@ function mergeBuildingLedgerFacts(
 
   const violation = textValue(ledger.violation_note);
   if (violation) facts.hasBuildingViolation = true;
+}
+
+function mergeAppraisalFloorsFacts(
+  facts: CaseDocumentFacts,
+  floors: unknown[],
+) {
+  const inferred = inferUnitsFromAppraisalFloors(floors, "auction-pdf");
+  if (inferred.composition.length === 0) return;
+  if (facts.buildingUnitComposition.length === 0) {
+    facts.buildingUnitComposition = inferred.composition;
+  }
+  if (inferred.residentialUnits > 0) {
+    assignNumberMax(facts, "residentialUnitCount", inferred.residentialUnits);
+  }
+  if (inferred.commercialUnits > 0) {
+    assignNumberMax(facts, "commercialUnitCount", inferred.commercialUnits);
+  }
+  if (inferred.totalUnits > 0) {
+    assignNumberMax(facts, "householdCount", inferred.totalUnits);
+  }
+}
+
+function mergeTenantListFacts(facts: CaseDocumentFacts, rows: unknown[]) {
+  const list = rows.map(asRecord).filter(Boolean) as Record<string, unknown>[];
+  if (list.length === 0) return;
+  const count = list.length;
+  if (facts.tenantCount == null || count > facts.tenantCount) {
+    facts.tenantCount = count;
+  }
+  const residentialCount = list.filter((tenant) =>
+    tenant.use === "residential" ||
+    /주거|주택|거주/.test(textValue(tenant.use)),
+  ).length;
+  const commercialCount = list.filter((tenant) =>
+    tenant.use === "commercial" ||
+    /점포|상가|사업자|근린/.test(textValue(tenant.use)),
+  ).length;
+  if (residentialCount > 0) {
+    assignNumberMax(facts, "residentialUnitCount", residentialCount);
+  }
+  if (commercialCount > 0) {
+    assignNumberMax(facts, "commercialUnitCount", commercialCount);
+  }
+  const totalDeposit = list.reduce(
+    (sum, tenant) => sum + (numberValue(tenant.deposit) ?? 0),
+    0,
+  );
+  const totalMonthlyRent = list.reduce(
+    (sum, tenant) => sum + (numberValue(tenant.monthly_rent) ?? 0),
+    0,
+  );
+  if (totalDeposit > 0) {
+    facts.totalDeposit = Math.max(facts.totalDeposit, totalDeposit);
+  }
+  if (totalMonthlyRent > 0) {
+    facts.totalMonthlyRent = Math.max(facts.totalMonthlyRent, totalMonthlyRent);
+  }
 }
 
 function mergeTenantFacts(
@@ -420,6 +571,23 @@ function assignNumber<K extends keyof CaseDocumentFacts>(
   if (value != null) {
     (facts[key] as CaseDocumentFacts[K]) = value as CaseDocumentFacts[K];
   }
+}
+
+function assignNumberMax<K extends keyof CaseDocumentFacts>(
+  facts: CaseDocumentFacts,
+  key: K,
+  raw: unknown,
+) {
+  const value = numberValue(raw);
+  if (value == null) return;
+  const current = facts[key];
+  if (typeof current === "number" && Number.isFinite(current)) {
+    if (value > current) {
+      (facts[key] as CaseDocumentFacts[K]) = value as CaseDocumentFacts[K];
+    }
+    return;
+  }
+  (facts[key] as CaseDocumentFacts[K]) = value as CaseDocumentFacts[K];
 }
 
 function assignRatio<K extends keyof CaseDocumentFacts>(

@@ -16,6 +16,7 @@ import {
 } from "@/lib/domain/remodeling-catalog";
 import { DEFAULT_REMODELING_PRICE_CATALOG } from "@/lib/domain/remodeling-catalog-daejeon";
 import { normalizeIdealReference } from "@/lib/domain/remodeling-reference";
+import { normalizeStoredManwon } from "@/lib/format/manwon";
 import type {
   AuctionCase,
   CaseRemodeling,
@@ -675,17 +676,7 @@ function normalizeOccupancy(raw: unknown): RemodelingOccupancy {
 }
 
 function normalizeManwon(raw: unknown): number | null {
-  if (raw === null || raw === undefined || raw === "") return null;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    return Math.round(Math.max(0, raw));
-  }
-  if (typeof raw === "string") {
-    const digits = raw.replace(/[^\d.]/g, "");
-    if (!digits) return null;
-    const parsed = Number(digits);
-    return Number.isFinite(parsed) ? Math.round(Math.max(0, parsed)) : null;
-  }
-  return null;
+  return normalizeStoredManwon(raw);
 }
 
 export function lineTotalManwon(line: RemodelingCostLine): number {

@@ -1,6 +1,10 @@
 "use client";
 
-import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import {
+  DeferredInput,
+  DeferredTextarea,
+} from "@/components/deferred-text-input";
+import { parseManwonInput } from "@/lib/format/manwon";
 import { HoverHint, LabelWithHint } from "@/components/hover-hint";
 import {
   emptyNearbyBroker,
@@ -143,11 +147,13 @@ export function CaseFieldInspectionContacts({
             <input
               type="number"
               min={0}
+              step="0.1"
+              inputMode="decimal"
               className={`${INPUT} tabular-nums`}
               value={m.monthlyFeePerUnitManwon ?? ""}
               onChange={(e) =>
                 updateManagement({
-                  monthlyFeePerUnitManwon: parseOptionalInt(e.target.value, 9999),
+                  monthlyFeePerUnitManwon: parseManwonInput(e.target.value),
                 })
               }
             />
@@ -234,10 +240,10 @@ export function CaseFieldInspectionContacts({
         </div>
         <label className="mt-3 block text-xs font-medium text-neutral-500">
           관리업체 메모
-          <AutoGrowTextarea
+          <DeferredTextarea
             className={INPUT}
             value={m.memo}
-            onChange={(e) => updateManagement({ memo: e.target.value })}
+            onCommit={(memo) => updateManagement({ memo })}
             rows={2}
             placeholder="수리 이력, 청소 주기, 관리실 위치 등"
           />
@@ -349,11 +355,11 @@ export function CaseFieldInspectionContacts({
                 <div className="mt-2 grid gap-2 lg:grid-cols-2">
                   <label className="text-xs font-medium text-neutral-500">
                     임대·월세 의견
-                    <AutoGrowTextarea
+                    <DeferredTextarea
                       className={INPUT}
                       value={b.rentOpinion}
-                      onChange={(e) =>
-                        updateBroker(b.id, { rentOpinion: e.target.value })
+                      onCommit={(rentOpinion) =>
+                        updateBroker(b.id, { rentOpinion })
                       }
                       rows={2}
                       placeholder="룸별 시세, 공실, 보증금 관행"
@@ -361,11 +367,11 @@ export function CaseFieldInspectionContacts({
                   </label>
                   <label className="text-xs font-medium text-neutral-500">
                     매매·호가 의견
-                    <AutoGrowTextarea
+                    <DeferredTextarea
                       className={INPUT}
                       value={b.saleOpinion}
-                      onChange={(e) =>
-                        updateBroker(b.id, { saleOpinion: e.target.value })
+                      onCommit={(saleOpinion) =>
+                        updateBroker(b.id, { saleOpinion })
                       }
                       rows={2}
                       placeholder="매각가·수익률·유사 건물 거래"
@@ -374,10 +380,10 @@ export function CaseFieldInspectionContacts({
                 </div>
                 <label className="mt-2 block text-xs font-medium text-neutral-500">
                   메모
-                  <input
+                  <DeferredInput
                     className={INPUT}
                     value={b.memo}
-                    onChange={(e) => updateBroker(b.id, { memo: e.target.value })}
+                    onCommit={(memo) => updateBroker(b.id, { memo })}
                   />
                 </label>
               </article>
@@ -430,20 +436,20 @@ export function CaseFieldInspectionContacts({
             label="공실 출입 메모"
             hint={FIELD_INSPECTION_HINTS.vacantAccess}
           />
-          <AutoGrowTextarea
+          <DeferredTextarea
             className={INPUT}
             value={record.vacantUnitAccessNote}
-            onChange={(e) => persist({ vacantUnitAccessNote: e.target.value })}
+            onCommit={(vacantUnitAccessNote) => persist({ vacantUnitAccessNote })}
             rows={2}
             placeholder="예: 201·302 공실, 관리실 열쇠, 비밀번호 1234*"
           />
         </label>
         <label className="mt-3 block text-xs font-medium text-neutral-500">
           <LabelWithHint label="임장 연락 메모" hint={FIELD_INSPECTION_HINTS.fieldMemo} />
-          <AutoGrowTextarea
+          <DeferredTextarea
             className={INPUT}
             value={record.memo}
-            onChange={(e) => persist({ memo: e.target.value })}
+            onCommit={(memo) => persist({ memo })}
             rows={3}
           />
         </label>

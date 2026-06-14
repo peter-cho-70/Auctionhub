@@ -17,9 +17,8 @@ export function getStorageQuotaMessage(): string | null {
   return quotaMessage;
 }
 
-export function setStorageQuotaMessage(message: string | null): void {
-  quotaMessage = message;
-  for (const fn of quotaListeners) fn(message);
+export function setStorageQuotaMessage(_message: string | null): void {
+  /* UI 배너 비표시 — 내부 압축·정리 로직만 유지 */
 }
 
 export function subscribeStorageQuota(listener: StorageQuotaListener): () => void {
@@ -200,12 +199,6 @@ export function reclaimBrowserStorageOnStartup(): {
 } {
   if (typeof window === "undefined") {
     return { ok: true, message: "" };
-  }
-
-  try {
-    localStorage.removeItem(SNAPSHOT_STORAGE_KEY);
-  } catch {
-    /* ignore */
   }
 
   const raw = localStorage.getItem(STORAGE_KEY);

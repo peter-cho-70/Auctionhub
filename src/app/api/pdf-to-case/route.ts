@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { createRequire } from "node:module";
-import { parseAuctionPdfText } from "@/lib/pdf/auction-pdf-parser";
+import { parseAuctionPdfByKind } from "@/lib/pdf/auction-pdf-parser";
 import { auctionPdfExtractToNewCaseInput } from "@/lib/pdf/pdf-to-newcase";
-import { buildPdfStructuredJson } from "@/lib/pdf/auctionone-structured";
+import { buildStructuredJsonForDocument } from "@/lib/pdf/auctionone-structured";
+import type { CaseSourceDocumentKind } from "@/lib/types/domain";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,7 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const file = form.get("file");
+    const kind = normalizeAuctionPdfKind(form.get("kind"));
     if (!(file instanceof File)) {
       return NextResponse.json(
         { ok: false, error: "file 필드에 PDF 파일을 넣어주세요." },
@@ -40,18 +42,20 @@ export async function POST(req: Request) {
 
     const rawText = String(text.text ?? "");
     const pageCount = Array.isArray(text.pages) ? text.pages.length : null;
-    const extracted = parseAuctionPdfText(rawText);
+    const extracted = parseAuctionPdfByKind(rawText, kind);
     const meta = {
       fileName: file.name,
       fileSize: file.size,
       pageCount,
     };
-    const structuredJson = buildPdfStructuredJson({
+    const structuredJson = buildStructuredJsonForDocument({
+      kind,
       extracted,
       rawText,
       meta,
     });
-    const sourceUrl = `pdf-import:${file.name}`.trim();
+    const sourceUrl =
+      extracted.sourceUrl?.trim() || `pdf-import:${file.name}`.trim();
 
     const mapped = auctionPdfExtractToNewCaseInput({
       extracted,
@@ -61,6 +65,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       meta,
+      kind,
       extracted,
       structuredJson,
       newCaseInput: mapped.input,
@@ -74,5 +79,13 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+}
+
+function normalizeAuctionPdfKind(
+  raw: FormDataEntryValue | null,
+): CaseSourceDocumentKind {
+  return raw === "speedauction-pdf" || raw === "daejangauction-pdf"
+    ? raw
+    : "daejangauction-pdf";
 }
 

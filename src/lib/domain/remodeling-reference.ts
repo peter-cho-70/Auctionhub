@@ -1,3 +1,4 @@
+import { normalizeStoredManwon } from "@/lib/format/manwon";
 import type {
   RemodelingIdealReference,
   RemodelingPriceCatalog,
@@ -65,7 +66,7 @@ function normalizePhoto(raw: unknown): RemodelingReferencePhoto | null {
   const est =
     typeof o.estimatedCostManwon === "number" &&
     Number.isFinite(o.estimatedCostManwon)
-      ? Math.round(Math.max(0, o.estimatedCostManwon))
+      ? normalizeStoredManwon(o.estimatedCostManwon)
       : null;
   const now = new Date().toISOString();
   return {

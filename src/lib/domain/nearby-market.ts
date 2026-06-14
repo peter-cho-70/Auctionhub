@@ -1,3 +1,4 @@
+import { formatManwonDigits, roundManwon } from "@/lib/format/manwon";
 import type {
   AuctionCase,
   NearbyMarketAnalysis,
@@ -328,12 +329,15 @@ export function inferDong(address: string): string {
 
 export function formatManwon(value: number | null): string {
   if (value == null || value <= 0) return "-";
-  if (value >= 10000) {
-    const eok = Math.floor(value / 10000);
-    const rest = value % 10000;
-    return rest ? `${eok}억 ${rest.toLocaleString("ko-KR")}만` : `${eok}억`;
+  const v = roundManwon(value);
+  if (v >= 10000) {
+    const eok = Math.floor(v / 10000);
+    const rest = roundManwon(v % 10000);
+    return rest > 0
+      ? `${eok}억 ${formatManwonDigits(rest)}만`
+      : `${eok}억`;
   }
-  return `${value.toLocaleString("ko-KR")}만`;
+  return `${formatManwonDigits(v)}만`;
 }
 
 export function buildSuggestedRentRows(c: AuctionCase, analysis: NearbyMarketAnalysis) {

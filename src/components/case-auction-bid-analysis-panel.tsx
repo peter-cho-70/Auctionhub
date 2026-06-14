@@ -33,10 +33,13 @@ import type {
   AuctionSaleSellerType,
 } from "@/lib/types/domain";
 import { formatWonWithUnit } from "@/lib/format/won";
+import { TABLE_COMPACT, TC_TD, TC_TH } from "@/lib/ui/compact-table";
 import { useAppStore } from "@/store/app-store";
 
 const INPUT =
   "mt-1 w-full rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900";
+const TABLE_INPUT =
+  "w-full min-w-0 rounded border border-neutral-300 bg-white px-1.5 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900";
 const BTN =
   "rounded-lg border border-neutral-300 px-2 py-1 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800";
 const SELECT = INPUT + " mt-0";
@@ -881,8 +884,12 @@ function ComparableTable({
     sortDir,
   );
 
-  const sortableTh = (key: ComparableSortKey, label: string) => (
-    <th className="p-2">
+  const sortableTh = (
+    key: ComparableSortKey,
+    label: string,
+    width = "",
+  ) => (
+    <th className={`${TC_TH} ${width}`.trim()}>
       <SortHeader
         label={label}
         active={sortKey === key}
@@ -906,19 +913,19 @@ function ComparableTable({
         {sortDir === "asc" ? "오름차순" : "내림차순"})
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-left text-xs">
+        <table className={TABLE_COMPACT}>
           <thead>
             <tr className="border-b border-neutral-200 dark:border-neutral-800">
-              <th className="p-2">주소</th>
-              {sortableTh("price", "낙찰가")}
-              {sortableTh("bidRate", "가율%")}
-              {sortableTh("year", "연식")}
-              {sortableTh("area", "면적㎡")}
-              <th className="p-2">주차</th>
-              <th className="p-2">회차</th>
-              <th className="p-2">유형</th>
-              {sortableTh("distance", "거리")}
-              <th className="p-2 w-28">작업</th>
+              <th className={TC_TH}>주소</th>
+              {sortableTh("price", "낙찰가", "w-[5.5rem]")}
+              {sortableTh("bidRate", "가율%", "w-14")}
+              {sortableTh("year", "연식", "w-24")}
+              {sortableTh("area", "면적㎡", "w-16")}
+              <th className={`${TC_TH} w-10`}>주차</th>
+              <th className={`${TC_TH} w-10`}>회차</th>
+              <th className={`${TC_TH} w-14`}>유형</th>
+              {sortableTh("distance", "거리", "w-14")}
+              <th className={`${TC_TH} w-24`}>작업</th>
             </tr>
           </thead>
           <tbody>
@@ -930,18 +937,18 @@ function ComparableTable({
                   key={row.id}
                   className="border-b border-neutral-100 dark:border-neutral-900"
                 >
-                  <td className="p-1">
+                  <td className={TC_TD}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.address}
                       onChange={(e) =>
                         onUpdate(row.id, { address: e.target.value })
                       }
                     />
                   </td>
-                  <td className="p-1 w-24">
+                  <td className={`${TC_TD} w-[5.5rem]`}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       inputMode="numeric"
                       value={row.winningBidPrice ?? ""}
                       onChange={(e) => {
@@ -954,9 +961,9 @@ function ComparableTable({
                       title="낙찰가(원)"
                     />
                   </td>
-                  <td className="p-1 w-16">
+                  <td className={`${TC_TD} w-14`}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.bidRatePct ?? ""}
                       onChange={(e) => {
                         const v = e.target.value.trim();
@@ -966,10 +973,10 @@ function ComparableTable({
                       }}
                     />
                   </td>
-                  <td className="p-1 w-28">
+                  <td className={`${TC_TD} w-24`}>
                     <input
                       type="date"
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.useApprovalDate?.slice(0, 10) ?? ""}
                       onChange={(e) =>
                         onUpdate(row.id, {
@@ -983,9 +990,9 @@ function ComparableTable({
                       </span>
                     ) : null}
                   </td>
-                  <td className="p-1 w-20">
+                  <td className={`${TC_TD} w-16`}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.buildingAreaSqm ?? ""}
                       onChange={(e) =>
                         onUpdate(row.id, {
@@ -997,9 +1004,9 @@ function ComparableTable({
                       }
                     />
                   </td>
-                  <td className="p-1 w-14">
+                  <td className={`${TC_TD} w-10`}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.parkingCount ?? ""}
                       onChange={(e) =>
                         onUpdate(row.id, {
@@ -1011,9 +1018,9 @@ function ComparableTable({
                       }
                     />
                   </td>
-                  <td className="p-1 w-12">
+                  <td className={`${TC_TD} w-10`}>
                     <input
-                      className={INPUT}
+                      className={TABLE_INPUT}
                       value={row.soldRound ?? ""}
                       onChange={(e) =>
                         onUpdate(row.id, {
@@ -1025,7 +1032,7 @@ function ComparableTable({
                       }
                     />
                   </td>
-                  <td className="p-1">
+                  <td className={`${TC_TD} w-14`}>
                     <label className="flex items-center gap-1 text-[10px]">
                       <input
                         type="checkbox"
@@ -1039,7 +1046,7 @@ function ComparableTable({
                     {row.isOngoing ? (
                       <div className="mt-1 flex gap-1">
                         <input
-                          className={`${INPUT} w-12`}
+                          className={`${TABLE_INPUT} w-10`}
                           placeholder="입찰"
                           title="입찰자 수"
                           value={row.bidderCount ?? ""}
@@ -1053,7 +1060,7 @@ function ComparableTable({
                           }
                         />
                         <input
-                          className={`${INPUT} w-12`}
+                          className={`${TABLE_INPUT} w-10`}
                           placeholder="유찰"
                           title="유찰 회차"
                           value={row.failedRoundCount ?? ""}
@@ -1096,11 +1103,11 @@ function ComparableTable({
                       ))}
                     </select>
                   </td>
-                  <td className="p-1 text-neutral-500 tabular-nums whitespace-nowrap">
+                  <td className={`${TC_TD} w-14 text-neutral-500 tabular-nums whitespace-nowrap`}>
                     {sc?.distanceM != null ? `${sc.distanceM}m` : "-"}
                     <span className="ml-1 text-[10px]">{sc?.tier}</span>
                   </td>
-                  <td className="p-1">
+                  <td className={`${TC_TD} w-24`}>
                     <div className="flex flex-wrap gap-1">
                       <button
                         type="button"

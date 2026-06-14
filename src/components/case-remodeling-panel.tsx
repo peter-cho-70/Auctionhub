@@ -30,6 +30,15 @@ import {
   syncCatalogToRemodeling,
 } from "@/lib/domain/remodeling-analysis";
 import {
+  TABLE_COMPACT,
+  TC_CHK,
+  TC_INPUT,
+  TC_MONEY,
+  TC_TD,
+  TC_TH,
+  TC_UNIT,
+} from "@/lib/ui/compact-table";
+import {
   collectUnitLabelsFromCase,
   createEmptyCostLine,
   lineTotalManwon,
@@ -37,6 +46,10 @@ import {
   normalizeCaseRemodeling,
 } from "@/lib/domain/remodeling";
 import { RemodelingReferencePanel } from "@/components/remodeling-reference-panel";
+import {
+  formatManwonWithSuffix,
+  parseManwonInput,
+} from "@/lib/format/manwon";
 import { formatWonWithUnit } from "@/lib/format/won";
 
 type Props = {
@@ -67,9 +80,7 @@ const SCENARIO_TONE: Record<RemodelingScenarioTier, string> = {
   full: "border-violet-200 bg-violet-50/60 dark:border-violet-900 dark:bg-violet-950/30",
 };
 
-function formatManwon(n: number): string {
-  return `${n.toLocaleString("ko-KR")}만원`;
-}
+const formatManwon = formatManwonWithSuffix;
 
 export function CaseRemodelingPanel({
   caseData,
@@ -413,15 +424,15 @@ export function CaseRemodelingPanel({
           </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className={TABLE_COMPACT}>
               <thead>
-                <tr className="border-b border-neutral-200 text-xs text-neutral-500 dark:border-neutral-700">
-                  <th className="py-2 pr-3">적용</th>
-                  <th className="py-2 pr-3">호실</th>
-                  <th className="py-2 pr-3">룸 유형</th>
-                  <th className="py-2 pr-3">입주</th>
-                  <th className="py-2 pr-3">완료</th>
-                  <th className="py-2">메모</th>
+                <tr className="border-b border-neutral-200 text-[11px] text-neutral-500 dark:border-neutral-700">
+                  <th className={`${TC_TH} ${TC_CHK}`}>적용</th>
+                  <th className={`${TC_TH} ${TC_UNIT}`}>호실</th>
+                  <th className={`${TC_TH} w-20`}>룸 유형</th>
+                  <th className={`${TC_TH} w-16`}>입주</th>
+                  <th className={`${TC_TH} ${TC_CHK}`}>완료</th>
+                  <th className={TC_TH}>메모</th>
                 </tr>
               </thead>
               <tbody>
@@ -432,7 +443,7 @@ export function CaseRemodelingPanel({
                       key={row.unitKey}
                       className="border-b border-neutral-100 dark:border-neutral-800"
                     >
-                      <td className="py-2 pr-3 align-top">
+                      <td className={`${TC_TD} ${TC_CHK} align-top`}>
                         <input
                           type="checkbox"
                           checked={row.apply}
@@ -443,12 +454,12 @@ export function CaseRemodelingPanel({
                           }
                         />
                       </td>
-                      <td className="py-2 pr-3 align-top font-medium">
+                      <td className={`${TC_TD} ${TC_UNIT} align-top font-medium`}>
                         {row.unitLabel}
                       </td>
-                      <td className="py-2 pr-3 align-top">
+                      <td className={`${TC_TD} w-20 align-top`}>
                         <select
-                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                          className={`${TC_INPUT} dark:border-neutral-700`}
                           value={row.roomUnitType}
                           onChange={(e) =>
                             updateAssignment(row.unitKey, {
@@ -465,9 +476,9 @@ export function CaseRemodelingPanel({
                           ))}
                         </select>
                       </td>
-                      <td className="py-2 pr-3 align-top">
+                      <td className={`${TC_TD} w-16 align-top`}>
                         <select
-                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                          className={`${TC_INPUT} dark:border-neutral-700`}
                           value={row.occupancy}
                           onChange={(e) =>
                             updateAssignment(row.unitKey, {
@@ -484,7 +495,7 @@ export function CaseRemodelingPanel({
                           ))}
                         </select>
                       </td>
-                      <td className="py-2 pr-3 align-top">
+                      <td className={`${TC_TD} ${TC_CHK} align-top`}>
                         <input
                           type="checkbox"
                           checked={row.completed}
@@ -495,9 +506,9 @@ export function CaseRemodelingPanel({
                           }
                         />
                       </td>
-                      <td className="py-2 align-top">
+                      <td className={`${TC_TD} align-top`}>
                         <input
-                          className="w-full min-w-[120px] rounded border border-neutral-200 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                          className={`${TC_INPUT} dark:border-neutral-700`}
                           value={row.memo}
                           onChange={(e) =>
                             updateAssignment(row.unitKey, { memo: e.target.value })
@@ -604,19 +615,19 @@ function CostLinesEditor({
         </div>
       </div>
       <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[960px] text-left text-xs">
+        <table className={TABLE_COMPACT}>
           <thead>
             <tr className="border-b border-neutral-200 text-neutral-500 dark:border-neutral-700">
-              <th className="py-2 pr-2">선택</th>
-              <th className="py-2 pr-2 min-w-[140px]">항목</th>
-              <th className="py-2 pr-2">범위</th>
-              <th className="py-2 pr-2">자재(만)</th>
-              <th className="py-2 pr-2">인건비(만)</th>
-              <th className="py-2 pr-2">DIY</th>
-              <th className="py-2 pr-2">월세↑(만)</th>
-              <th className="py-2 pr-2 min-w-[100px]">효과·메모</th>
-              <th className="py-2 text-right">소계</th>
-              <th className="py-2 w-8" />
+              <th className={`${TC_TH} ${TC_CHK}`}>선택</th>
+              <th className={`${TC_TH} w-28`}>항목</th>
+              <th className={`${TC_TH} w-16`}>범위</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>자재(만)</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>인건비(만)</th>
+              <th className={`${TC_TH} ${TC_CHK}`}>DIY</th>
+              <th className={`${TC_TH} ${TC_MONEY}`}>월세↑(만)</th>
+              <th className={`${TC_TH} w-24`}>효과·메모</th>
+              <th className={`${TC_TH} ${TC_MONEY} text-right`}>소계</th>
+              <th className={`${TC_TH} w-8`} />
             </tr>
           </thead>
           <tbody>
@@ -625,7 +636,7 @@ function CostLinesEditor({
                 key={line.id}
                 className="border-b border-neutral-100 dark:border-neutral-800"
               >
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} ${TC_CHK} align-top`}>
                   <input
                     type="checkbox"
                     checked={line.selected}
@@ -634,9 +645,9 @@ function CostLinesEditor({
                     }
                   />
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} w-28 align-top`}>
                   <input
-                    className="w-full min-w-[120px] rounded border border-neutral-200 px-2 py-1 font-medium dark:border-neutral-700 dark:bg-neutral-900"
+                    className={`${TC_INPUT} font-medium dark:border-neutral-700`}
                     value={line.item}
                     onChange={(e) =>
                       updateLine(line.id, { item: e.target.value })
@@ -648,9 +659,9 @@ function CostLinesEditor({
                     </span>
                   )}
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} w-16 align-top`}>
                   <select
-                    className="w-full rounded border border-neutral-200 px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                    className={`${TC_INPUT} dark:border-neutral-700`}
                     value={line.workScope ?? ""}
                     onChange={(e) =>
                       updateLine(line.id, {
@@ -668,11 +679,13 @@ function CostLinesEditor({
                     )}
                   </select>
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                   <input
                     type="number"
                     min={0}
-                    className="w-16 rounded border border-neutral-200 px-2 py-1 tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
+                    step="0.1"
+                    inputMode="decimal"
+                    className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                     value={line.materialManwon ?? ""}
                     onChange={(e) =>
                       updateLine(line.id, {
@@ -681,11 +694,13 @@ function CostLinesEditor({
                     }
                   />
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                   <input
                     type="number"
                     min={0}
-                    className="w-16 rounded border border-neutral-200 px-2 py-1 tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
+                    step="0.1"
+                    inputMode="decimal"
+                    className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                     value={line.laborManwon ?? ""}
                     disabled={line.diy}
                     onChange={(e) =>
@@ -695,7 +710,7 @@ function CostLinesEditor({
                     }
                   />
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} ${TC_CHK} align-top`}>
                   <input
                     type="checkbox"
                     checked={line.diy}
@@ -704,11 +719,13 @@ function CostLinesEditor({
                     }
                   />
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                   <input
                     type="number"
                     min={0}
-                    className="w-14 rounded border border-neutral-200 px-2 py-1 tabular-nums dark:border-neutral-700 dark:bg-neutral-900"
+                    step="0.1"
+                    inputMode="decimal"
+                    className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                     value={line.rentUpliftManwon ?? ""}
                     onChange={(e) =>
                       updateLine(line.id, {
@@ -717,19 +734,19 @@ function CostLinesEditor({
                     }
                   />
                 </td>
-                <td className="py-2 pr-2 align-top">
+                <td className={`${TC_TD} w-24 align-top`}>
                   <input
-                    className="w-full min-w-[100px] rounded border border-neutral-200 px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                    className={`${TC_INPUT} dark:border-neutral-700`}
                     value={line.effectNote}
                     onChange={(e) =>
                       updateLine(line.id, { effectNote: e.target.value })
                     }
                   />
                 </td>
-                <td className="py-2 text-right tabular-nums align-top">
+                <td className={`${TC_TD} ${TC_MONEY} text-right tabular-nums align-top`}>
                   {line.selected ? formatManwon(lineTotalManwon(line)) : "—"}
                 </td>
-                <td className="py-2 align-top">
+                <td className={`${TC_TD} w-8 align-top`}>
                   <button
                     type="button"
                     className="text-rose-600 hover:underline"
@@ -847,18 +864,18 @@ function RemodelingCatalogSection({
             </button>
           </div>
           <div className="mt-3 max-h-[min(480px,50vh)] overflow-auto">
-            <table className="w-full min-w-[980px] text-left text-xs">
+            <table className={TABLE_COMPACT}>
               <thead className="sticky top-0 bg-amber-50 dark:bg-amber-950">
                 <tr className="border-b border-amber-200/60 text-neutral-600 dark:border-amber-900">
-                  <th className="py-2 pr-2">분류</th>
-                  <th className="py-2 pr-2 min-w-[120px]">항목명</th>
-                  <th className="py-2 pr-2">시나리오</th>
-                  <th className="py-2 pr-2">범위</th>
-                  <th className="py-2 pr-2">자재</th>
-                  <th className="py-2 pr-2">인건비</th>
-                  <th className="py-2 pr-2">DIY</th>
-                  <th className="py-2 pr-2">월세↑</th>
-                  <th className="w-8" />
+                  <th className={`${TC_TH} w-20`}>분류</th>
+                  <th className={`${TC_TH} w-28`}>항목명</th>
+                  <th className={`${TC_TH} w-20`}>시나리오</th>
+                  <th className={`${TC_TH} w-16`}>범위</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>자재</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>인건비</th>
+                  <th className={`${TC_TH} ${TC_CHK}`}>DIY</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>월세↑</th>
+                  <th className={`${TC_TH} w-8`} />
                 </tr>
               </thead>
               <tbody>
@@ -867,26 +884,26 @@ function RemodelingCatalogSection({
                     key={item.key}
                     className="border-b border-amber-100/80 dark:border-amber-900/30"
                   >
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} w-20 align-top`}>
                       <input
                         list="remodel-categories"
-                        className="w-24 rounded border border-neutral-200 px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        className={`${TC_INPUT} dark:border-neutral-700`}
                         value={item.category}
                         onChange={(e) =>
                           updateItem(item.key, { category: e.target.value })
                         }
                       />
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} w-28 align-top`}>
                       <input
-                        className="w-full min-w-[100px] rounded border border-neutral-200 px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        className={`${TC_INPUT} dark:border-neutral-700`}
                         value={item.item}
                         onChange={(e) =>
                           updateItem(item.key, { item: e.target.value })
                         }
                       />
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} w-20 align-top`}>
                       <div className="flex flex-col gap-0.5">
                         {(
                           ["minimal", "balanced", "full"] as RemodelingScenarioTier[]
@@ -907,9 +924,9 @@ function RemodelingCatalogSection({
                         ))}
                       </div>
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} w-16 align-top`}>
                       <select
-                        className="rounded border border-neutral-200 px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        className={`${TC_INPUT} dark:border-neutral-700`}
                         value={item.workScope}
                         onChange={(e) =>
                           updateItem(item.key, {
@@ -926,11 +943,13 @@ function RemodelingCatalogSection({
                         )}
                       </select>
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                       <input
                         type="number"
                         min={0}
-                        className="w-14 tabular-nums rounded border px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        step="0.1"
+                        inputMode="decimal"
+                        className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                         value={item.materialManwon}
                         onChange={(e) =>
                           updateItem(item.key, {
@@ -939,11 +958,13 @@ function RemodelingCatalogSection({
                         }
                       />
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                       <input
                         type="number"
                         min={0}
-                        className="w-14 tabular-nums rounded border px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        step="0.1"
+                        inputMode="decimal"
+                        className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                         value={item.laborManwon}
                         onChange={(e) =>
                           updateItem(item.key, {
@@ -952,7 +973,7 @@ function RemodelingCatalogSection({
                         }
                       />
                     </td>
-                    <td className="py-1.5 pr-2 align-top text-center">
+                    <td className={`${TC_TD} ${TC_CHK} align-top text-center`}>
                       <input
                         type="checkbox"
                         checked={item.diy}
@@ -961,11 +982,13 @@ function RemodelingCatalogSection({
                         }
                       />
                     </td>
-                    <td className="py-1.5 pr-2 align-top">
+                    <td className={`${TC_TD} ${TC_MONEY} align-top`}>
                       <input
                         type="number"
                         min={0}
-                        className="w-12 tabular-nums rounded border px-1 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+                        step="0.1"
+                        inputMode="decimal"
+                        className={`${TC_INPUT} tabular-nums dark:border-neutral-700`}
                         value={item.rentUpliftManwon.oneRoom}
                         title="원룸 월세 상승(만원)"
                         onChange={(e) =>
@@ -1003,8 +1026,3 @@ function RemodelingCatalogSection({
   );
 }
 
-function parseManwonInput(raw: string): number | null {
-  if (!raw.trim()) return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
-}

@@ -11,7 +11,7 @@ import {
 } from "@/lib/data/compact-storage";
 import { useAppStore } from "@/store/app-store";
 
-/** 편집 후 일정 시간 지나면 로컬 스냅샷(최대 2개)에 자동 반영 */
+/** 편집 후 일정 시간 지나면 로컬 스냅샷(최대 5개)에 자동 반영 */
 const DEBOUNCE_MS = 90_000;
 
 export function LocalDataAutosnapshot() {

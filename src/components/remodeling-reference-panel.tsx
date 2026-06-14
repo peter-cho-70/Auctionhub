@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import {
+  formatManwonWithSuffix,
+  parseManwonInput,
+} from "@/lib/format/manwon";
 import type {
   RemodelingIdealReference,
   RemodelingPriceCatalog,
@@ -36,9 +40,7 @@ const INPUT =
 const BTN =
   "rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800";
 
-function formatManwon(n: number): string {
-  return `${n.toLocaleString("ko-KR")}만원`;
-}
+const formatManwon = formatManwonWithSuffix;
 
 function ReferencePhotoThumb({
   caseId,
@@ -440,14 +442,13 @@ function PhotoEditor({
       <label className="block text-xs font-medium text-neutral-500">
         추가 예상 비용 (만원, 수동)
         <input
-          inputMode="numeric"
+          inputMode="decimal"
           className={`${INPUT} tabular-nums`}
-          placeholder="카탈로그 외 추가비"
+          placeholder="카탈로그 외 추가비 (예: 12.5)"
           value={photo.estimatedCostManwon ?? ""}
           onChange={(e) => {
-            const raw = e.target.value.replace(/[^\d]/g, "");
             onPatch({
-              estimatedCostManwon: raw === "" ? null : Number(raw),
+              estimatedCostManwon: parseManwonInput(e.target.value),
             });
           }}
         />

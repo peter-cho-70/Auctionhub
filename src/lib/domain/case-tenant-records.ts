@@ -8,6 +8,13 @@ import {
   textValue,
   numberValue,
 } from "@/lib/domain/case-document-payload";
+import type { ExpectedDividendPayload } from "@/lib/domain/tenant-dividend-display";
+import { getExpectedDividendFromDocuments } from "@/lib/domain/tenant-dividend-display";
+import {
+  compareTenantUnit,
+  normalizeTenantUnit,
+  TENANT_SPEC_PRIORITY_FIELDS,
+} from "@/lib/domain/tenant-spec-merge";
 
 const DIVIDEND_STATUSES: TenantDividendStatus[] = [
   "full",
@@ -102,47 +109,167 @@ export function createTenantRecord(unit = ""): CaseTenantRecord {
   };
 }
 
+function specFieldToTenantRecord(
+  field: (typeof TENANT_SPEC_PRIORITY_FIELDS)[number],
+  row: Record<string, unknown>,
+  prev: CaseTenantRecord | undefined,
+): Partial<CaseTenantRecord> {
+  switch (field) {
+    case "name":
+      return { occupantName: textValue(row.name) || prev?.occupantName || "" };
+    case "deposit":
+      return { deposit: numberValue(row.deposit) ?? prev?.deposit ?? null };
+    case "monthly_rent":
+      return {
+        monthlyRent: numberValue(row.monthly_rent) ?? prev?.monthlyRent ?? null,
+      };
+    case "move_in_date":
+      return {
+        moveInDate: textValue(row.move_in_date) || prev?.moveInDate || "",
+      };
+    case "confirmed_date":
+      return {
+        confirmedDate: textValue(row.confirmed_date) || prev?.confirmedDate || "",
+      };
+    case "dividend_request_date":
+      return {
+        dividendRequestDate:
+          textValue(row.dividend_request_date) || prev?.dividendRequestDate || "",
+      };
+    case "has_opposing_power": {
+      const opposing =
+        row.has_opposing_power === true ||
+        /대항|대항력/.test(textValue(row.notes));
+      return {
+        hasOpposingPower: opposing ? true : prev?.hasOpposingPower ?? null,
+      };
+    }
+    default:
+      return {};
+  }
+}
+
 export function mergeTenantRecordsFromPdf(
   existing: CaseTenantRecord[],
   c: AuctionCase,
 ): CaseTenantRecord[] {
   const rows = tenantRowsFromCase(c);
   if (!rows.length) return existing;
-  const byUnit = new Map(existing.map((r) => [r.unit, r]));
-  const out: CaseTenantRecord[] = [...existing];
+  const byUnit = new Map(
+    existing.map((r) => [normalizeTenantUnit(r.unit) || r.unit, r]),
+  );
+  const out: CaseTenantRecord[] = [];
+
   for (const row of rows) {
-    const unit = textValue(row.unit) || textValue(row.name) || "호실";
+    const unit =
+      normalizeTenantUnit(row.unit) ||
+      textValue(row.unit) ||
+      textValue(row.name) ||
+      "호실";
     const prev = byUnit.get(unit);
-    const opposing =
-      row.has_opposing_power === true ||
-      /대항|대항력/.test(textValue(row.notes));
-    const patch: CaseTenantRecord = {
+    let patch: CaseTenantRecord = {
       ...(prev ?? createTenantRecord(unit)),
       unit,
-      occupantName: textValue(row.name) || prev?.occupantName || "",
-      deposit: numberValue(row.deposit) ?? prev?.deposit ?? null,
-      monthlyRent:
-        numberValue(row.monthly_rent) ?? prev?.monthlyRent ?? null,
-      moveInDate:
-        textValue(row.move_in_date) || prev?.moveInDate || "",
-      confirmedDate:
-        textValue(row.confirmed_date) || prev?.confirmedDate || "",
-      dividendRequestDate:
-        textValue(row.dividend_request_date) ||
-        prev?.dividendRequestDate ||
-        "",
-      hasOpposingPower: opposing ? true : prev?.hasOpposingPower ?? null,
       updatedAt: new Date().toISOString(),
     };
-    if (prev) {
-      const idx = out.findIndex((r) => r.id === prev.id);
-      if (idx >= 0) out[idx] = patch;
-    } else {
-      out.push(patch);
-      byUnit.set(unit, patch);
+    for (const field of TENANT_SPEC_PRIORITY_FIELDS) {
+      patch = { ...patch, ...specFieldToTenantRecord(field, row, prev) };
     }
+    const memo = textValue(row.notes);
+    if (memo) {
+      patch.memo = prev?.memo?.trim() ? prev.memo : memo.slice(0, 200);
+    }
+    out.push(patch);
+    byUnit.delete(unit);
   }
-  return out;
+
+  return out.sort((a, b) =>
+    compareTenantUnit({ unit: a.unit }, { unit: b.unit }),
+  );
+}
+
+function normalizeOccupantName(name: string): string {
+  return name.replace(/\s+/g, "").trim();
+}
+
+export function syncTenantRecordsFromExpectedDividend(
+  existing: CaseTenantRecord[],
+  dividend: ExpectedDividendPayload,
+  tenantRows: Record<string, unknown>[],
+): CaseTenantRecord[] {
+  const byName = new Map(
+    existing.map((r) => [normalizeOccupantName(r.occupantName), r]),
+  );
+  const byUnit = new Map(existing.map((r) => [normalizeTenantUnit(r.unit) || r.unit, r]));
+  const out = [...existing];
+
+  for (const pdfRow of dividend.rows) {
+    const nameKey = normalizeOccupantName(pdfRow.name);
+    let record =
+      byName.get(nameKey) ??
+      tenantRows
+        .map((row) => {
+          const unit = normalizeTenantUnit(row.unit) || textValue(row.unit);
+          const occupant = textValue(row.name);
+          if (normalizeOccupantName(occupant) !== nameKey) return null;
+          const prev = byUnit.get(unit);
+          return (
+            prev ?? {
+              ...createTenantRecord(unit),
+              unit,
+              occupantName: occupant,
+            }
+          );
+        })
+        .find(Boolean);
+
+    if (!record) {
+      record = createTenantRecord("");
+      record.occupantName = pdfRow.name;
+    }
+
+    const patch: CaseTenantRecord = {
+      ...record,
+      deposit: pdfRow.claim_amount > 0 ? pdfRow.claim_amount : record.deposit,
+      dividendAmount: pdfRow.dividend_amount,
+      undividedAmount: pdfRow.undivided_amount,
+      dividendStatus: pdfRow.status,
+      memo: pdfRow.note ? pdfRow.note.slice(0, 200) : record.memo,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const idx = out.findIndex((r) => r.id === record!.id);
+    if (idx >= 0) out[idx] = patch;
+    else out.push(patch);
+
+    byName.set(nameKey, patch);
+  }
+
+  return out.sort((a, b) =>
+    compareTenantUnit({ unit: a.unit }, { unit: b.unit }),
+  );
+}
+
+export function refreshTenantRecordsFromCase(c: AuctionCase): CaseTenantRecord[] {
+  let records = mergeTenantRecordsFromPdf(c.tenantRecords, c);
+  const expected = getExpectedDividendFromDocuments(c.sourceDocuments);
+  if (expected?.rows.length) {
+    records = syncTenantRecordsFromExpectedDividend(
+      records,
+      expected,
+      tenantRowsFromCase(c),
+    );
+  }
+  return records;
+}
+
+export function summarizeTenantRecordDividends(records: CaseTenantRecord[]) {
+  return {
+    full: records.filter((r) => r.dividendStatus === "full").length,
+    partial: records.filter((r) => r.dividendStatus === "partial").length,
+    none: records.filter((r) => r.dividendStatus === "none").length,
+    unknown: records.filter((r) => r.dividendStatus === "unknown").length,
+  };
 }
 
 export function tenantRecordsForReport(

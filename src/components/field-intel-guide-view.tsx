@@ -1,5 +1,6 @@
 "use client";
 
+import { TABLE_COMPACT, TC_MONEY, TC_TD, TC_TH } from "@/lib/ui/compact-table";
 import type {
   FieldIntelAuctionRow,
   FieldIntelGuide,
@@ -25,13 +26,13 @@ function SectionBlock({ section }: { section: FieldIntelSection }) {
       {section.table && section.table.length > 0 && (
         <div className="mt-4 overflow-x-auto">
           {isRentTable(section.table) ? (
-            <table className="w-full min-w-[520px] text-left text-xs">
+            <table className={TABLE_COMPACT}>
               <thead>
                 <tr className="border-b text-neutral-500">
-                  <th className="py-2 pr-2">유형</th>
-                  <th className="py-2 pr-2">보증금</th>
-                  <th className="py-2 pr-2">월세</th>
-                  <th className="py-2">비고</th>
+                  <th className={`${TC_TH} w-20`}>유형</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>보증금</th>
+                  <th className={`${TC_TH} w-[4.5rem]`}>월세</th>
+                  <th className={TC_TH}>비고</th>
                 </tr>
               </thead>
               <tbody>
@@ -40,10 +41,10 @@ function SectionBlock({ section }: { section: FieldIntelSection }) {
                     key={row.unitType}
                     className="border-b border-neutral-100 dark:border-neutral-800"
                   >
-                    <td className="py-2 pr-2 font-medium">{row.unitType}</td>
-                    <td className="py-2 pr-2">{row.deposit}</td>
-                    <td className="py-2 pr-2">{row.monthlyRent}</td>
-                    <td className="py-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} w-20 font-medium`}>{row.unitType}</td>
+                    <td className={`${TC_TD} ${TC_MONEY}`}>{row.deposit}</td>
+                    <td className={`${TC_TD} w-[4.5rem]`}>{row.monthlyRent}</td>
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {row.note}
                     </td>
                   </tr>
@@ -51,12 +52,12 @@ function SectionBlock({ section }: { section: FieldIntelSection }) {
               </tbody>
             </table>
           ) : (
-            <table className="w-full min-w-[480px] text-left text-xs">
+            <table className={TABLE_COMPACT}>
               <thead>
                 <tr className="border-b text-neutral-500">
-                  <th className="py-2 pr-2">구분</th>
-                  <th className="py-2 pr-2">금액</th>
-                  <th className="py-2">사장 의견</th>
+                  <th className={`${TC_TH} w-24`}>구분</th>
+                  <th className={`${TC_TH} ${TC_MONEY}`}>금액</th>
+                  <th className={TC_TH}>사장 의견</th>
                 </tr>
               </thead>
               <tbody>
@@ -65,9 +66,9 @@ function SectionBlock({ section }: { section: FieldIntelSection }) {
                     key={row.label}
                     className="border-b border-neutral-100 dark:border-neutral-800"
                   >
-                    <td className="py-2 pr-2 font-medium">{row.label}</td>
-                    <td className="py-2 pr-2">{row.amount}</td>
-                    <td className="py-2 text-neutral-600 dark:text-neutral-400">
+                    <td className={`${TC_TD} w-24 font-medium`}>{row.label}</td>
+                    <td className={`${TC_TD} ${TC_MONEY}`}>{row.amount}</td>
+                    <td className={`${TC_TD} text-neutral-600 dark:text-neutral-400`}>
                       {row.opinion}
                     </td>
                   </tr>

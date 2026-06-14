@@ -1,3 +1,4 @@
+import { normalizeStoredManwon } from "@/lib/format/manwon";
 import type {
   BuildingManagementContact,
   FieldContactDistance,
@@ -173,7 +174,7 @@ function normalizeManagement(raw: unknown): BuildingManagementContact {
     serviceScopes: normalizeServiceScopes(o.serviceScopes),
     serviceScopeOther:
       typeof o.serviceScopeOther === "string" ? o.serviceScopeOther : "",
-    monthlyFeePerUnitManwon: normalizeOptionalInt(o.monthlyFeePerUnitManwon, 9999),
+    monthlyFeePerUnitManwon: normalizeStoredManwon(o.monthlyFeePerUnitManwon, 9999),
     vacantAccessAvailable: normalizeTriState(o.vacantAccessAvailable),
     arrearsLedgerAvailable: normalizeTriState(o.arrearsLedgerAvailable),
     remoteManagement: normalizeTriState(o.remoteManagement),

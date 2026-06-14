@@ -28,6 +28,9 @@ import { normalizeCaseAddressMeta } from "@/lib/address/normalize";
 import { normalizeFieldPhotoGallery } from "@/lib/domain/field-photo-gallery";
 import { normalizeTenantRecords } from "@/lib/domain/case-tenant-records";
 import { normalizeMarketReferenceNotes } from "@/lib/domain/market-reference-notes";
+import { normalizeCaseListColor } from "@/lib/domain/case-list-display";
+import { normalizeCaseListThumbnail } from "@/lib/domain/case-list-thumbnail";
+import { normalizePdfCoverSettings } from "@/lib/pdf/pdf-cover-settings";
 import { normalizeExternalAiQaList } from "@/lib/domain/external-ai-qa";
 import {
   normalizeAuctionBidAnalysis,
@@ -124,6 +127,9 @@ export function mergeImportedData(
       ...current.propertyAnalysisSettings,
       ...incoming.propertyAnalysisSettings,
     },
+    pdfCoverSettings: incoming.pdfCoverSettings
+      ? normalizePdfCoverSettings(incoming.pdfCoverSettings)
+      : current.pdfCoverSettings,
     processStepOrder: incoming.processStepOrder.length
       ? incoming.processStepOrder
       : current.processStepOrder,
@@ -188,6 +194,12 @@ function mergeSameCasePreservingLocalAnalysis(
       : incomingCase.auctionBidAnalysis ?? currentCase.auctionBidAnalysis;
   return {
     ...currentCase,
+    listTitle:
+      currentCase.listTitle?.trim() ||
+      incomingCase.listTitle?.trim() ||
+      "",
+    listColor: currentCase.listColor ?? incomingCase.listColor ?? null,
+    listThumbnail: currentCase.listThumbnail ?? incomingCase.listThumbnail ?? null,
     nearbyMarketAnalysis,
     remodeling,
     fieldInspection,
@@ -217,7 +229,9 @@ export function ensureAppData(raw: unknown): AppData {
     }
     return createDefaultAppData();
   }
-  if (!Array.isArray(o.cases)) return createDefaultAppData();
+  if (!Array.isArray(o.cases)) {
+    return ensureAppData({ ...o, cases: [], schemaVersion: SCHEMA_VERSION });
+  }
   const lectureGuideByStep =
     o.lectureGuideByStep && typeof o.lectureGuideByStep === "object"
       ? { ...o.lectureGuideByStep }
@@ -234,6 +248,9 @@ export function ensureAppData(raw: unknown): AppData {
       : { noDividendRequestGuide: DEFAULT_NO_DIVIDEND_REQUEST_GUIDE };
   const propertyAnalysisSettings = normalizePropertyAnalysisSettings(
     (o as unknown as Record<string, unknown>).propertyAnalysisSettings,
+  );
+  const pdfCoverSettings = normalizePdfCoverSettings(
+    (o as unknown as Record<string, unknown>).pdfCoverSettings,
   );
   const cases = o.cases.map((c) => {
     const cx = c as {
@@ -329,6 +346,9 @@ export function ensureAppData(raw: unknown): AppData {
       fieldPhotoGallery: normalizeFieldPhotoGallery(cAny.fieldPhotoGallery),
       tenantRecords: normalizeTenantRecords(cAny.tenantRecords),
       addressMeta: normalizeCaseAddressMeta(cAny.addressMeta),
+      listTitle: typeof cAny.listTitle === "string" ? cAny.listTitle : "",
+      listColor: normalizeCaseListColor(cAny.listColor),
+      listThumbnail: normalizeCaseListThumbnail(cAny.listThumbnail),
       casePhase: normalizeCasePhase(cAny.casePhase, status),
       preAuction: normalizePreAuctionWorkflow(cAny.preAuction),
       postAuction: normalizePostAuctionWorkflow(cAny.postAuction),
@@ -349,6 +369,7 @@ export function ensureAppData(raw: unknown): AppData {
     lectureGuideByStep,
     tenantAnalysisSettings,
     propertyAnalysisSettings,
+    pdfCoverSettings,
     cases,
     knowledgeNotes,
     sharedExternalAiQa: normalizeExternalAiQaList(oAny.sharedExternalAiQa),
@@ -544,6 +565,12 @@ function normalizeSourceDocuments(raw: unknown): CaseSourceDocument[] {
             : `srcdoc-${i + 1}`,
         kind,
         fileName: typeof o.fileName === "string" ? o.fileName : "",
+        originalFileName:
+          typeof o.originalFileName === "string" ? o.originalFileName : null,
+        storedFileName:
+          typeof o.storedFileName === "string" ? o.storedFileName : null,
+        pdfBlobRef:
+          typeof o.pdfBlobRef === "string" ? o.pdfBlobRef : null,
         fileSize:
           typeof o.fileSize === "number" && Number.isFinite(o.fileSize)
             ? Math.max(0, Math.floor(o.fileSize))
@@ -567,12 +594,15 @@ function normalizeSourceDocuments(raw: unknown): CaseSourceDocument[] {
 }
 
 function normalizeSourceDocumentKind(raw: unknown): CaseSourceDocumentKind {
-  return raw === "auctionone-pdf" ||
+  if (raw === "auctionone-pdf") return "speedauction-pdf";
+  return raw === "daejangauction-pdf" ||
+    raw === "speedauction-pdf" ||
     raw === "registry-building" ||
     raw === "registry-land" ||
     raw === "building-ledger" ||
     raw === "appraisal-report" ||
     raw === "tenant-report" ||
+    raw === "expected-dividend" ||
     raw === "json"
     ? raw
     : "pdf";

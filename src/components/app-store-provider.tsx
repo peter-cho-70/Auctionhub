@@ -6,8 +6,13 @@ import {
   saveAppStateAction,
 } from "@/app/actions/app-state";
 import { LocalDataAutosnapshot } from "@/components/local-data-autosnapshot";
+import { DataProtectionTracker } from "@/components/data-protection-tracker";
 import { SupabaseAutosave } from "@/components/supabase-autosave";
 import { saveLocalDataSnapshot } from "@/lib/data/client-backup";
+import {
+  snapshotBeforeDestructiveChange,
+  snapshotPersistedStorageBeforeMaintenance,
+} from "@/lib/data/data-protection";
 import {
   compactAppDataForStorage,
   flushDebouncedPersist,
@@ -29,16 +34,23 @@ export function AppStoreProvider({
 
   useEffect(() => {
     void (async () => {
+      snapshotPersistedStorageBeforeMaintenance();
       reclaimBrowserStorageOnStartup();
       await useAppStore.persist.rehydrate();
       const afterHydrate = useAppStore.getState().data;
+      if (afterHydrate.cases.length > 0) {
+        snapshotBeforeDestructiveChange(
+          useAppStore.getState().exportDataJson(),
+          "after-hydrate-before-compact",
+        );
+      }
       const compacted = compactAppDataForStorage(afterHydrate, {
         stripExtractedText: true,
         maxGuCacheKeys: 5,
       });
       const beforeBytes = JSON.stringify(afterHydrate).length;
       const afterBytes = JSON.stringify(compacted).length;
-      if (afterBytes < beforeBytes) {
+      if (afterBytes < beforeBytes && afterHydrate.cases.length > 0) {
         useAppStore.setState({ data: compacted });
         persistAppDataNow(compacted);
       }
@@ -61,6 +73,7 @@ export function AppStoreProvider({
                 saveLocalDataSnapshot(
                   store.exportDataJson(),
                   "before-cloud-startup-merge",
+                  { preserveFull: true },
                 );
               }
               store.importData(remote.json, "merge");
@@ -100,6 +113,7 @@ export function AppStoreProvider({
     <>
       {children}
       <LocalDataAutosnapshot />
+      <DataProtectionTracker />
       <SupabaseAutosave />
     </>
   );

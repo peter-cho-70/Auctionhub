@@ -9,7 +9,7 @@
 | `NAVER_MAP_CLIENT_SECRET` | 지도 좌표 | Geocoding (Secret **전체** 복사) |
 | `NEXT_PUBLIC_NAVER_MAP_CLIENT_ID` | 지도·Geocoding ID | Maps Application Client ID |
 
-`.env.local`에 설정 후 `npm run dev`를 재시작하세요.
+`cp .env.example .env.local` 후 키를 채우고 `npm run dev`를 재시작하세요.
 
 ## 주소 검색 (행안부)
 

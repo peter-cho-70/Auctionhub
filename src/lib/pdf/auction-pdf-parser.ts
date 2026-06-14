@@ -2,8 +2,10 @@ import {
   detectAuctionPdfFormat,
   parseSpeedAuctionPdfText,
 } from "@/lib/pdf/speed-auction-pdf-parser";
+import { parseDaejangAuctionPdfText } from "@/lib/pdf/daejang-auction-pdf-parser";
+import type { CaseSourceDocumentKind } from "@/lib/types/domain";
 
-export type AuctionPdfFormat = "speedauction" | "auctionone";
+export type AuctionPdfFormat = "speedauction" | "auctionone" | "daejangauction";
 
 export type SpeedAuctionBidSchedule = {
   round: string | null;
@@ -29,6 +31,17 @@ export type SpeedAuctionNearbyStat = {
   saleRatePct: number | null;
   failCountAvg: number | null;
   estimatedPrice: number | null;
+};
+
+export type SpeedAuctionAncillaryStructure = {
+  seq: number | null;
+  jibun: string | null;
+  floor: string | null;
+  structure: string | null;
+  useType: string | null;
+  areaSqm: number | null;
+  appraisalPrice: number | null;
+  includedInSale: boolean | null;
 };
 
 export type AuctionPdfExtract = {
@@ -65,6 +78,8 @@ export type AuctionPdfExtract = {
   saleTarget?: string | null;
   landAppraisal?: number | null;
   buildingAppraisal?: number | null;
+  ancillaryAppraisal?: number | null;
+  sourceUrl?: string | null;
   builtYearSource?: string | null;
   appraisalDate?: string | null;
   appraisalCompany?: string | null;
@@ -80,8 +95,13 @@ export type AuctionPdfExtract = {
   tenantDepositTotal?: number | null;
   tenantMonthlyRentTotal?: number | null;
   householdCountHint?: number | null;
+  buildingCoverageRatioPct?: number | null;
+  floorAreaRatioPct?: number | null;
+  residentialUnitHint?: number | null;
+  commercialUnitHint?: number | null;
   bidSchedules?: SpeedAuctionBidSchedule[];
   buildingFloors?: SpeedAuctionFloor[];
+  ancillaryStructures?: SpeedAuctionAncillaryStructure[];
   nearbyStats?: SpeedAuctionNearbyStat[];
 };
 
@@ -234,6 +254,8 @@ function parseAuctionOnePdfText(text: string): AuctionPdfExtract {
     format: "auctionone",
     caseNumber,
     address,
+    addressJibun: address,
+    addressRoad: null,
     propertyType,
     appraisalPrice,
     minPrice,
@@ -251,9 +273,18 @@ function parseAuctionOnePdfText(text: string): AuctionPdfExtract {
 }
 
 export function parseAuctionPdfText(text: string): AuctionPdfExtract {
-  const format = detectAuctionPdfFormat(text);
-  if (format === "speedauction") {
+  return parseDaejangAuctionPdfText(text);
+}
+
+export function parseAuctionPdfByKind(
+  text: string,
+  kind: CaseSourceDocumentKind,
+): AuctionPdfExtract {
+  if (kind === "speedauction-pdf" || kind === "auctionone-pdf") {
     return parseSpeedAuctionPdfText(text);
   }
-  return parseAuctionOnePdfText(text);
+  if (kind === "daejangauction-pdf") {
+    return parseDaejangAuctionPdfText(text);
+  }
+  return parseDaejangAuctionPdfText(text);
 }

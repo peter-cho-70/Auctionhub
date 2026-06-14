@@ -9,6 +9,16 @@ const nextConfig: NextConfig = {
    * 서버 런타임에서는 external로 로드합니다.
    */
   serverExternalPackages: ["pdf-parse"],
+  /** React dev performance.measure 오류 방지 — page.tsx redirect() 대신 라우팅 단계에서 처리 */
+  async redirects() {
+    return [
+      {
+        source: "/",
+        destination: "/cases",
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

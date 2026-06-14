@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import { DeferredTextarea } from "@/components/deferred-text-input";
 import type {
   AuctionCase,
   MultiFamilyAnalysis,
@@ -395,10 +395,10 @@ export function CaseMultiFamilyAnalysisPanel({
         </div>
         <label className="block text-xs font-medium text-neutral-500">
           매각사례 메모
-          <AutoGrowTextarea
+          <DeferredTextarea
             className={INPUT}
             value={analysis.saleCaseMemo}
-            onChange={(e) => update({ saleCaseMemo: e.target.value })}
+            onCommit={(saleCaseMemo) => update({ saleCaseMemo })}
             placeholder="사례 주소, 준공연도, 주차, 세대수, 룸구성, 수리상태, 특수권리 차이를 기록하세요."
           />
         </label>
@@ -587,10 +587,10 @@ export function CaseMultiFamilyAnalysisPanel({
         </div>
         <label className="block text-xs font-medium text-neutral-500">
           수익률 분석 메모
-          <AutoGrowTextarea
+          <DeferredTextarea
             className={INPUT}
             value={analysis.profit.memo}
-            onChange={(e) => updateProfit({ memo: e.target.value })}
+            onCommit={(memo) => updateProfit({ memo })}
             placeholder="주변 호가 매물, 실제 금리, 부동산 상담 내용"
           />
         </label>
@@ -888,19 +888,19 @@ export function CaseFieldInspectionPanel({
         <div className="grid gap-3 lg:grid-cols-2">
           <label className="block text-xs font-medium text-neutral-500">
             임장 메모
-            <AutoGrowTextarea
+            <DeferredTextarea
               className={INPUT}
               value={analysis.memo}
-              onChange={(e) => update({ memo: e.target.value })}
+              onCommit={(memo) => update({ memo })}
               placeholder="현장 확인 결과, 주변 시세, 관리비·공실, 부동산 답변"
             />
           </label>
           <label className="block text-xs font-medium text-neutral-500">
             사전/사후 점수 차이 원인
-            <AutoGrowTextarea
+            <DeferredTextarea
               className={INPUT}
               value={analysis.postFieldGapReason}
-              onChange={(e) => update({ postFieldGapReason: e.target.value })}
+              onCommit={(postFieldGapReason) => update({ postFieldGapReason })}
               placeholder="예: 실제 주차 불가, 복도 누수, 내부 상태 양호 등"
             />
           </label>

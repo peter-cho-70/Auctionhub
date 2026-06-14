@@ -198,6 +198,21 @@ export interface PropertyAnalysisSettings {
   highLandPricePerSqmManwon: number;
 }
 
+/** PDF 표지 캡처(1024×640) 위 목록 썸네일 고정 크롭 영역 (픽셀) */
+export interface PdfCoverListCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** PDF 1페이지 표지 캡처·목록 크롭 전역 설정 */
+export interface PdfCoverSettings {
+  captureWidth: number;
+  captureHeight: number;
+  listCrop: PdfCoverListCrop;
+}
+
 export type BuildingUnitUseType = "residential" | "commercial" | "other";
 
 export interface BuildingUnitComposition {
@@ -473,7 +488,14 @@ export interface RentSettingUnitRow {
   roomType: string;
   deposit: number | null;
   monthlyRent: number | null;
+  /** @deprecated areaSqm 우선 — 마이그레이션 호환 */
   areaPyeong: number | null;
+  /** 방 크기 (㎡) */
+  areaSqm: number | null;
+  /** 자동 계약(연장) 시 임차인명 */
+  tenantName: string;
+  /** 리모델링 예정 여부 */
+  remodelingPlanned: boolean | null;
   note: string;
 }
 
@@ -673,21 +695,30 @@ export interface MultiFamilyAnalysis {
 }
 
 export type CaseSourceDocumentKind =
+  | "daejangauction-pdf"
+  | "speedauction-pdf"
   | "auctionone-pdf"
   | "registry-building"
   | "registry-land"
   | "building-ledger"
   | "appraisal-report"
   | "tenant-report"
+  | "expected-dividend"
   | "pdf"
   | "json";
 
 export interface CaseSourceDocument {
   id: string;
   kind: CaseSourceDocumentKind;
+  /** 저장·표시 파일명 (사건번호_종류.pdf) */
   fileName: string;
+  /** 업로드 당시 원본 파일명 */
+  originalFileName?: string | null;
   fileSize: number | null;
   pageCount: number | null;
+  /** IndexedDB 경로 `{사건번호}/{사건번호}_{종류}.pdf` */
+  storedFileName?: string | null;
+  pdfBlobRef?: string | null;
   /** PDF에서 추출한 원문 텍스트 전체 */
   extractedText: string;
   /** 옥션원 스키마 등 파서가 만든 구조화 원본 */
@@ -762,10 +793,28 @@ export interface PreAuctionWorkflow {
   reportFinalized: boolean;
 }
 
+/** 상담사 답변에서 정리하는 대출 조건 */
+export interface PostAuctionLoanCounselorResult {
+  /** 담보인정비율 (소수, 0.67 = 67%) */
+  collateralRatio: number | null;
+  mortgageSummary: string;
+  trustSummary: string;
+  /** 상담사 확인 대출 한도 (원) */
+  confirmedLoanLimit: number | null;
+  /** 연 이율 (소수, 0.047 = 4.7%) */
+  annualRate: number | null;
+  notes: string;
+}
+
 export interface PostAuctionLoanPackage {
   preApprovalNotes: string;
   executionNotes: string;
   memo: string;
+  counselorResult: PostAuctionLoanCounselorResult;
+  /** 월 이자 계산용 대출금 (원) */
+  calcLoanAmount: number | null;
+  /** 월 이자 계산용 연 이율 (소수) */
+  calcAnnualRate: number | null;
 }
 
 export interface PostAuctionEvictionPackage {
@@ -808,6 +857,12 @@ export interface FieldPhotoRecord {
 
 export interface CaseFieldPhotoGallery {
   photos: FieldPhotoRecord[];
+}
+
+/** 물건 목록 썸네일 (IndexedDB `list-thumbnail` / list-cover) */
+export interface CaseListThumbnail {
+  mimeType: string;
+  updatedAt: string;
 }
 
 export type TenantDividendStatus = "full" | "partial" | "none" | "unknown";
@@ -858,6 +913,9 @@ export function emptyCaseAddressMeta(): CaseAddressMeta {
   };
 }
 
+/** 물건 목록 색상 라벨 (5색) */
+export type CaseListColor = "rose" | "amber" | "emerald" | "sky" | "violet" | null;
+
 export interface AuctionCase {
   id: string;
   createdAt: string;
@@ -865,6 +923,12 @@ export interface AuctionCase {
   sourceUrl: string;
   caseNumber: string;
   address: string;
+  /** 목록에만 쓰는 표시 제목 (비어 있으면 사건번호·주소) */
+  listTitle: string;
+  /** 목록 행 색상 */
+  listColor: CaseListColor;
+  /** 목록 썸네일 (원문 탭에서 등록) */
+  listThumbnail: CaseListThumbnail | null;
   /** 행안부 주소 검색으로 확정한 표준 주소·법정동·PNU 등 */
   addressMeta: CaseAddressMeta | null;
   propertyType: string;
@@ -964,6 +1028,8 @@ export interface AppData {
   tenantAnalysisSettings: TenantAnalysisSettings;
   /** 물건 특성 표시 기준 */
   propertyAnalysisSettings: PropertyAnalysisSettings;
+  /** PDF 표지 캡처·목록 크롭 */
+  pdfCoverSettings: PdfCoverSettings;
   messageTemplates: MessageTemplate[];
   knowledgeNotes: KnowledgeNote[];
   sharedExternalAiQa: ExternalAiQaEntry[];

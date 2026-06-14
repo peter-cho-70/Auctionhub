@@ -22,6 +22,9 @@ export function emptyRentSetting(): RentSetting {
     deposit: null,
     monthlyRent: null,
     areaPyeong: null,
+    areaSqm: null,
+    tenantName: "",
+    remodelingPlanned: null,
     note: "",
   }));
   return {
@@ -82,6 +85,9 @@ export function newRentUnitRow(): RentSettingUnitRow {
     deposit: null,
     monthlyRent: null,
     areaPyeong: null,
+    areaSqm: null,
+    tenantName: "",
+    remodelingPlanned: null,
     note: "",
   };
 }
@@ -229,6 +235,14 @@ function normalizeRows(raw: unknown): RentSettingUnitRow[] {
       typeof o.id === "string" && o.id.trim()
         ? o.id
         : rowId(i);
+    const areaPyeong = normalizePyeong(o.areaPyeong);
+    let areaSqm = normalizeSqm(o.areaSqm);
+    if (areaSqm == null && areaPyeong != null) {
+      areaSqm = Math.round(areaPyeong * PYEONG_TO_SQM * 100) / 100;
+    }
+    const remodelingRaw = o.remodelingPlanned;
+    const remodelingPlanned =
+      remodelingRaw === true || remodelingRaw === false ? remodelingRaw : null;
     return {
       id,
       floor: typeof o.floor === "string" ? o.floor : "",
@@ -236,7 +250,10 @@ function normalizeRows(raw: unknown): RentSettingUnitRow[] {
       roomType: typeof o.roomType === "string" ? o.roomType : "",
       deposit: normalizeMoney(o.deposit),
       monthlyRent: normalizeMoney(o.monthlyRent),
-      areaPyeong: normalizePyeong(o.areaPyeong),
+      areaPyeong,
+      areaSqm,
+      tenantName: typeof o.tenantName === "string" ? o.tenantName : "",
+      remodelingPlanned,
       note: typeof o.note === "string" ? o.note : "",
     };
   });
